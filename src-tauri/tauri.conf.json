@@ -1,0 +1,67 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AI Usage Bar",
+  "version": "0.1.0",
+  "identifier": "dev.calebterry.ai-usage-bar",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "settings",
+        "title": "AI Usage Bar — Settings",
+        "width": 460,
+        "height": 600,
+        "resizable": true,
+        "visible": false,
+        "center": true,
+        "url": "index.html?view=settings"
+      },
+      {
+        "label": "panel",
+        "title": "AI Usage Bar",
+        "width": 320,
+        "height": 360,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "url": "index.html?view=panel"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Claude Code + OpenAI Codex usage monitor.",
+    "longDescription": "A lightweight cross-platform menu bar / system tray monitor that surfaces your Claude Code and OpenAI Codex usage limits (5-hour and weekly windows, or spend caps) at a glance. Reads local CLI OAuth credentials read-only; no telemetry.",
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {}
+}

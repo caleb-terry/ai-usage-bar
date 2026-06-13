@@ -1,0 +1,116 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.panel-loading,
+.panel-cards {
+  flex: 1;
+  padding: 14px;
+  overflow-y: auto;
+}
+
+.panel-loading {
+  display: grid;
+  place-items: center;
+  color: var(--text-dim);
+}
+
+.panel-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.snapshot {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.snapshot.compact {
+  opacity: 0.85;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.snapshot-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.provider-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.provider-dot.claude {
+  background: var(--accent);
+}
+.provider-dot.codex {
+  background: var(--codex);
+  border: 1px solid var(--border);
+}
+
+.snapshot-title {
+  font-weight: 600;
+  flex: 1;
+}
+
+.snapshot-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.empty-state {
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.empty-state code {
+  background: var(--bg-elev);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.snapshot-extras {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.panel-actions {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+
+.panel-actions button {
+  flex: 1;
+  padding: 7px;
+  border-radius: 7px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-weight: 500;
+  transition: background 0.15s;
+}
+.panel-actions button:hover:not(:disabled) {
+  background: var(--track);
+}
+.panel-actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

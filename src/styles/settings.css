@@ -1,0 +1,111 @@
+.settings {
+  max-width: 460px;
+  margin: 0 auto;
+  padding: 18px 20px 28px;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.settings.loading {
+  display: grid;
+  place-items: center;
+  color: var(--text-dim);
+}
+
+.settings h1 {
+  font-size: 17px;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+
+.group {
+  margin-bottom: 22px;
+}
+
+.group h2 {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+.row:last-child {
+  border-bottom: none;
+}
+
+.row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.toggle-row {
+  cursor: pointer;
+}
+
+.status {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--text-dim);
+}
+.status-connected {
+  color: var(--ok);
+}
+.status-sign-in,
+.status-api {
+  color: var(--warn);
+}
+
+.row select {
+  font: inherit;
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--border);
+  min-width: 140px;
+}
+
+.row input[type="range"] {
+  width: 150px;
+  accent-color: var(--accent);
+}
+
+.row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.provider-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.provider-dot.claude {
+  background: var(--accent);
+}
+.provider-dot.codex {
+  background: var(--codex);
+  border: 1px solid var(--border);
+}
+
+.settings-footer {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
