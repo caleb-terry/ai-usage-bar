@@ -14,6 +14,7 @@ pub mod ids {
     pub const STYLE_BARS: &str = "style_bars";
     pub const TOGGLE_REMAINING: &str = "toggle_remaining";
     pub const REFRESH: &str = "refresh";
+    pub const OPEN_TERMINAL: &str = "open_terminal";
     pub const SETTINGS: &str = "settings";
     pub const LAUNCH_AT_LOGIN: &str = "launch_at_login";
     pub const QUIT: &str = "quit";
@@ -72,6 +73,8 @@ pub fn build_menu<R: Runtime>(
         .build(app)?;
 
     let refresh = MenuItemBuilder::with_id(ids::REFRESH, "Refresh now").build(app)?;
+    let open_terminal =
+        MenuItemBuilder::with_id(ids::OPEN_TERMINAL, "Open Terminal").build(app)?;
     let settings_item = MenuItemBuilder::with_id(ids::SETTINGS, "Settings…").build(app)?;
     let quit = MenuItemBuilder::with_id(ids::QUIT, "Quit AI Usage Bar").build(app)?;
 
@@ -83,6 +86,7 @@ pub fn build_menu<R: Runtime>(
         .item(&toggle_remaining)
         .separator()
         .item(&refresh)
+        .item(&open_terminal)
         .item(&settings_item)
         .item(&launch_at_login)
         .separator()

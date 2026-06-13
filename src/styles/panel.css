@@ -2,113 +2,300 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  /* The window itself supplies the rounded NSVisualEffectView (vibrancy) on
+     macOS, so the panel stays transparent and lets that glass show through.
+     A hairline inner ring (inset shadow, not a border) keeps the rim crisp on
+     the rounded corners without the 1px border that used to clip square. */
+  background: var(--panel-bg, transparent);
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 0.5px var(--panel-rim, rgba(255, 255, 255, 0.12));
   overflow: hidden;
 }
 
-.panel-loading,
-.panel-cards {
-  flex: 1;
-  padding: 14px;
-  overflow-y: auto;
+/* Non-macOS platforms have no vibrancy backing — give the panel a solid fill so
+   it isn't see-through against the desktop. */
+.no-vibrancy .panel {
+  --panel-bg: var(--bg);
+  --panel-rim: var(--border);
 }
 
 .panel-loading {
+  flex: 1;
   display: grid;
   place-items: center;
   color: var(--text-dim);
 }
 
+/* ---- tab bar ---- */
+
+.tab-bar {
+  display: flex;
+  padding: 8px 8px 0;
+  gap: 2px;
+  /* Transparent so the window vibrancy reads through the top of the panel.
+     A faint hairline divider replaces the hard 1px border that used to run
+     straight into the rounded corners. */
+  background: transparent;
+  box-shadow: inset 0 -0.5px 0 var(--panel-rim, rgba(255, 255, 255, 0.08));
+  -webkit-app-region: drag;
+}
+.no-vibrancy .tab-bar {
+  background: var(--bg);
+}
+
+.tab {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px 9px;
+  color: var(--text-dim);
+  border-radius: 8px 8px 0 0;
+  transition: color 0.15s, background 0.15s;
+}
+.tab:hover {
+  color: var(--text);
+  background: var(--bg-elev);
+}
+.tab.active {
+  color: var(--text);
+}
+
+.tab-icon {
+  display: grid;
+  place-items: center;
+  height: 18px;
+}
+
+.tab-text {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* The colored accent under the active tab, in the provider's brand color. */
+.tab-underline {
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  bottom: -1px;
+  height: 2.5px;
+  border-radius: 3px 3px 0 0;
+  background: var(--tab-accent);
+  opacity: 0;
+  transform: scaleX(0.4);
+  transition: opacity 0.18s, transform 0.18s;
+}
+.tab.active .tab-underline {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+/* ---- scrolling content ---- */
+
+.panel-scroll {
+  flex: 1;
+  overflow-y: auto;
+}
+
 .panel-cards {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
+  padding: 12px;
 }
+
+/* ---- cards ---- */
 
 .snapshot {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
+  border-radius: 12px;
+  padding: 16px;
 }
 
-.snapshot.compact {
-  opacity: 0.85;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+/* The brand-colored hero card for the active / selected provider. A soft
+   top-down sheen + inner highlight give it the layered depth of a Tahoe glass
+   tile rather than a flat slab. */
+.snapshot.hero {
+  --hero-fg: #ffffff;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--hero-bg) 88%, white) 0%,
+      var(--hero-bg) 55%
+    );
+  color: var(--hero-fg);
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.28),
+    0 8px 22px -10px color-mix(in srgb, var(--hero-bg) 65%, transparent);
+}
+
+/* Quieter cards in the Overview list below the hero. Translucent so the window
+   vibrancy reads through, with a hairline rim instead of a hard 1px border. */
+.snapshot.plain {
+  background: color-mix(in srgb, var(--bg-elev) 55%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--panel-rim, rgba(255, 255, 255, 0.1));
+}
+.no-vibrancy .snapshot.plain {
+  background: var(--bg-elev);
 }
 
 .snapshot-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
 }
 
-.provider-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  flex-shrink: 0;
+.snapshot-mark {
+  display: grid;
+  place-items: center;
 }
-.provider-dot.claude {
-  background: var(--accent);
-}
-.provider-dot.codex {
-  background: var(--codex);
-  border: 1px solid var(--border);
+.snapshot.plain .snapshot-mark {
+  color: var(--card-accent);
 }
 
 .snapshot-title {
-  font-weight: 600;
   flex: 1;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.snapshot.plain .snapshot-title {
+  font-size: 14px;
+}
+
+.snapshot-plan {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: capitalize;
+  opacity: 0.85;
+}
+.snapshot.hero .snapshot-plan {
+  opacity: 0.9;
 }
 
 .snapshot-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
-.empty-state {
-  color: var(--text-dim);
+/* ---- metric rows ---- */
+
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.metric-label {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.bar-track.on-hero {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.metric-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
   font-size: 12px;
-  line-height: 1.5;
 }
-.empty-state code {
-  background: var(--bg-elev);
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-size: 11px;
+
+.metric-value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
+
+.metric-reset {
+  opacity: 0.72;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- extras footer ---- */
 
 .snapshot-extras {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 12px;
-  font-size: 11px;
-  color: var(--text-dim);
+  gap: 6px 18px;
+  padding-top: 12px;
+  font-size: 12px;
+  border-top: 1px solid;
+  border-color: var(--border);
 }
+.snapshot.hero .snapshot-extras {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+.snapshot-extras span {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.snapshot-extras em {
+  font-style: normal;
+  font-weight: 500;
+  font-size: 11px;
+  opacity: 0.72;
+}
+
+.empty-state {
+  font-size: 12px;
+  line-height: 1.55;
+  opacity: 0.85;
+}
+.empty-state code {
+  background: rgba(127, 127, 127, 0.18);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.snapshot.hero .empty-state code {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.stale-badge {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+/* ---- footer actions ---- */
 
 .panel-actions {
   display: flex;
   gap: 8px;
-  padding: 10px 14px;
-  border-top: 1px solid var(--border);
+  padding: 10px 12px;
+  /* Hairline divider (inset) instead of a hard border that would meet the
+     rounded bottom corners; transparent so vibrancy reads through the footer. */
+  box-shadow: inset 0 0.5px 0 var(--panel-rim, rgba(255, 255, 255, 0.08));
+  background: transparent;
+  -webkit-app-region: no-drag;
+}
+.no-vibrancy .panel-actions {
   background: var(--bg-elev);
 }
 
 .panel-actions button {
   flex: 1;
-  padding: 7px;
-  border-radius: 7px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  font-weight: 500;
+  padding: 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-elev) 70%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--panel-rim, rgba(255, 255, 255, 0.14));
+  font-weight: 600;
+  font-size: 12px;
   transition: background 0.15s;
 }
 .panel-actions button:hover:not(:disabled) {
-  background: var(--track);
+  background: color-mix(in srgb, var(--bg-elev) 95%, white);
 }
 .panel-actions button:disabled {
   opacity: 0.6;

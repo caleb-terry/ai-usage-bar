@@ -1,5 +1,6 @@
 //! Shared application state, held in Tauri's managed state.
 
+use crate::notify::NotifyState;
 use crate::settings::Settings;
 use crate::usage::aggregator::Aggregator;
 use tokio::sync::Mutex;
@@ -7,6 +8,8 @@ use tokio::sync::Mutex;
 pub struct AppState {
     pub settings: Mutex<Settings>,
     pub aggregator: Mutex<Aggregator>,
+    /// Per-provider memory for edge-triggered quota notifications.
+    pub notify: Mutex<NotifyState>,
     /// Shared HTTP client; retained for ad-hoc fetches (e.g. manual re-auth).
     #[allow(dead_code)]
     pub http: reqwest::Client,
@@ -17,6 +20,7 @@ impl AppState {
         Self {
             settings: Mutex::new(settings),
             aggregator: Mutex::new(aggregator),
+            notify: Mutex::new(NotifyState::default()),
             http,
         }
     }

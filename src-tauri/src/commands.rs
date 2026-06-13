@@ -41,6 +41,15 @@ pub async fn get_usage(state: State<'_, AppState>) -> Result<UsageReport, String
     })
 }
 
+/// Launch the user's preferred terminal application. Best-effort; see
+/// `crate::launch_terminal`.
+#[tauri::command]
+pub async fn open_terminal(state: State<'_, AppState>) -> Result<(), String> {
+    let terminal = state.settings.lock().await.default_terminal;
+    crate::launch_terminal(terminal);
+    Ok(())
+}
+
 /// Force an immediate poll of all enabled providers, returning the fresh report.
 #[tauri::command]
 pub async fn refresh_now(state: State<'_, AppState>) -> Result<UsageReport, String> {

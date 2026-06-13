@@ -27,6 +27,41 @@ pub enum DisplayStyle {
     Bars,
 }
 
+/// UI display language. `System` follows the OS locale; otherwise an explicit
+/// locale. Only English ships today, but the enum is the extension point so the
+/// stored preference is forward-compatible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum Language {
+    #[default]
+    System,
+    En,
+}
+
+/// Terminal application launched by the "Open Terminal" action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum TerminalApp {
+    /// macOS Terminal.app / the platform default terminal.
+    #[default]
+    Terminal,
+    ITerm,
+    Warp,
+    Ghostty,
+}
+
+impl TerminalApp {
+    /// The macOS application name passed to `open -a`.
+    pub fn macos_app(self) -> &'static str {
+        match self {
+            TerminalApp::Terminal => "Terminal",
+            TerminalApp::ITerm => "iTerm",
+            TerminalApp::Warp => "Warp",
+            TerminalApp::Ghostty => "Ghostty",
+        }
+    }
+}
+
 /// Green/yellow/red thresholds for utilization coloring.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Thresholds {
@@ -61,6 +96,20 @@ pub struct Settings {
     /// Windows-only: open the floating panel on left-click (vs. settings).
     pub windows_float_panel: bool,
     pub launch_at_login: bool,
+    /// UI display language. Takes effect after the window reloads.
+    pub language: Language,
+    /// Terminal launched by the "Open Terminal" action.
+    pub default_terminal: TerminalApp,
+    /// Show the local cost summary (today + history window) in the menu/panel.
+    pub show_cost_summary: bool,
+    /// History window for the cost summary, in days (clamped 1..=90).
+    pub cost_history_days: u32,
+    /// Poll provider status pages and surface incidents in the icon/menu.
+    pub check_provider_status: bool,
+    /// Notify when the 5-hour session quota hits 0% and when it returns.
+    pub session_quota_notifications: bool,
+    /// Warn when session/weekly remaining crosses the configured thresholds.
+    pub quota_warning_notifications: bool,
 }
 
 impl Default for Settings {
@@ -74,6 +123,13 @@ impl Default for Settings {
             thresholds: Thresholds::default(),
             windows_float_panel: true,
             launch_at_login: false,
+            language: Language::default(),
+            default_terminal: TerminalApp::default(),
+            show_cost_summary: true,
+            cost_history_days: 30,
+            check_provider_status: true,
+            session_quota_notifications: true,
+            quota_warning_notifications: true,
         }
     }
 }
@@ -81,6 +137,11 @@ impl Default for Settings {
 impl Settings {
     pub fn poll_interval(&self) -> std::time::Duration {
         std::time::Duration::from_secs(self.poll_interval_secs.clamp(60, 900))
+    }
+
+    /// Cost-summary history window in days, clamped to a sane 1..=90 range.
+    pub fn cost_history_days(&self) -> u32 {
+        self.cost_history_days.clamp(1, 90)
     }
 
     pub fn provider_enabled(&self, id: ProviderId) -> bool {
@@ -148,6 +209,19 @@ mod tests {
     }
 
     #[test]
+    fn cost_history_days_is_clamped() {
+        let mut s = Settings {
+            cost_history_days: 0,
+            ..Default::default()
+        };
+        assert_eq!(s.cost_history_days(), 1);
+        s.cost_history_days = 9999;
+        assert_eq!(s.cost_history_days(), 90);
+        s.cost_history_days = 30;
+        assert_eq!(s.cost_history_days(), 30);
+    }
+
+    #[test]
     fn display_pct_respects_remaining() {
         let mut s = Settings::default();
         assert_eq!(s.display_pct(30.0), 30.0);
@@ -162,6 +236,13 @@ mod tests {
             poll_interval_secs: 120,
             active_provider: ActiveProvider::Claude,
             display_style: DisplayStyle::Bars,
+            language: Language::En,
+            default_terminal: TerminalApp::Ghostty,
+            show_cost_summary: false,
+            cost_history_days: 7,
+            check_provider_status: false,
+            session_quota_notifications: false,
+            quota_warning_notifications: false,
             ..Default::default()
         };
         let json = serde_json::to_string(&s).unwrap();

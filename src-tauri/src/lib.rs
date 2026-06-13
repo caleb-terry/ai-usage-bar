@@ -5,6 +5,7 @@
 //! provider (user-selected or auto-picked by highest utilization).
 
 mod commands;
+mod notify;
 pub mod providers;
 mod settings;
 mod state;
@@ -27,6 +28,11 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_autostart::ManagerExt;
 
 const TRAY_ID: &str = "main-tray";
+
+/// Set when the user picks "Quit" so the `ExitRequested` guard below lets the
+/// process actually exit. Without this, the guard that keeps the app alive when
+/// a window closes would also veto a deliberate quit. See `on_menu_event`.
+static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -56,6 +62,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -75,6 +82,7 @@ pub fn run() {
             commands::set_settings,
             commands::get_usage,
             commands::refresh_now,
+            commands::open_terminal,
         ])
         .setup(|app| {
             // Build the initial menu/tray from settings loaded directly off
@@ -98,6 +106,22 @@ pub fn run() {
                 .on_menu_event(on_menu_event)
                 .on_tray_icon_event(on_tray_icon_event)
                 .build(app)?;
+
+            // Give the floating panel a genuine macOS vibrancy backing
+            // (NSVisualEffectView) rounded to match the CSS card, so it reads as
+            // a Tahoe "liquid glass" surface instead of a flat opaque rectangle.
+            // The rounded effect view is what removes the corner "slop": the
+            // glass layer itself clips to the radius, so nothing pokes past it.
+            #[cfg(target_os = "macos")]
+            if let Some(panel) = app.get_webview_window("panel") {
+                use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
+                let _ = apply_vibrancy(
+                    &panel,
+                    NSVisualEffectMaterial::Popover,
+                    Some(NSVisualEffectState::Active),
+                    Some(14.0),
+                );
+            }
 
             // Keep the settings/panel windows hidden until invoked, and hide
             // (rather than close) them so the app keeps running.
@@ -124,11 +148,48 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error building app")
         .run(|_app, event| {
-            // Prevent the app from exiting when the last window hides.
+            // Keep the app alive when a window (e.g. Settings) closes — but let
+            // a deliberate Quit through, signalled by the QUITTING flag.
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
-                api.prevent_exit();
+                if !QUITTING.load(std::sync::atomic::Ordering::SeqCst) {
+                    api.prevent_exit();
+                }
             }
         });
+}
+
+/// Spawn the user's preferred terminal application. Best-effort; failures are
+/// logged but otherwise ignored (there is no UI surface to report them to from
+/// the tray menu). Shared by the tray menu handler and the `open_terminal`
+/// IPC command.
+pub(crate) fn launch_terminal(terminal: crate::settings::TerminalApp) {
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open")
+        .args(["-a", terminal.macos_app()])
+        .spawn();
+
+    #[cfg(target_os = "windows")]
+    let result = {
+        let _ = terminal; // app choice is macOS-only for now
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", "wt.exe"])
+            .spawn()
+            .or_else(|_| {
+                std::process::Command::new("cmd")
+                    .args(["/C", "start", "", "cmd.exe"])
+                    .spawn()
+            })
+    };
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let result = {
+        let _ = terminal;
+        std::process::Command::new("x-terminal-emulator").spawn()
+    };
+
+    if let Err(e) = result {
+        log::warn!("failed to open terminal: {e}");
+    }
 }
 
 fn is_first_run() -> bool {
@@ -149,6 +210,17 @@ async fn poll_loop<R: Runtime>(app: AppHandle<R>) {
             let changed = agg.poll_enabled(&settings).await;
             (settings, changed)
         };
+
+        // Edge-triggered quota notifications from the freshly cached snapshots.
+        {
+            let state = app.state::<AppState>();
+            let snapshots = state.aggregator.lock().await.all_cached().clone();
+            let pending = state.notify.lock().await.evaluate(&settings, &snapshots);
+            for n in pending {
+                use tauri_plugin_notification::NotificationExt;
+                let _ = app.notification().builder().title(n.title).body(n.body).show();
+            }
+        }
 
         // Always refresh on the first pass; afterwards only when the active
         // provider changed.
@@ -179,19 +251,27 @@ async fn update_tray<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
 
     let Some(snapshot) = snapshot else { return };
     let appearance = tray::theme::detect();
-    let rendered = tray::render_icon(&snapshot, settings, appearance);
 
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };
 
-    let image = Image::new_owned(rendered.rgba, rendered.width, rendered.height);
-    let _ = tray.set_icon(Some(image));
+    // macOS: provider glyph (template) + the 5h percentage as the menu-bar title.
+    // Other platforms have no separate title, so keep the self-contained bitmap
+    // that bakes the numbers/bars into the icon.
     #[cfg(target_os = "macos")]
     {
+        let rendered = tray::render_provider_glyph(snapshot.provider, appearance);
+        let image = Image::new_owned(rendered.rgba, rendered.width, rendered.height);
+        let _ = tray.set_icon(Some(image));
         let _ = tray.set_icon_as_template(rendered.is_template);
-        // On macOS show the compact title alongside the icon in numbers mode.
-        let _ = tray.set_title(Some(menu_title(&snapshot, settings)));
+        let _ = tray.set_title(Some(tray_title(&snapshot, settings)));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let rendered = tray::render_icon(&snapshot, settings, appearance);
+        let image = Image::new_owned(rendered.rgba, rendered.width, rendered.height);
+        let _ = tray.set_icon(Some(image));
     }
 
     let _ = tray.set_tooltip(Some(tooltip(&snapshot, settings)));
@@ -202,15 +282,14 @@ async fn update_tray<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
     }
 }
 
-/// Short title shown next to the macOS menu bar icon, e.g. "42·18".
-fn menu_title(snapshot: &UsageSnapshot, settings: &Settings) -> String {
+/// Short title shown next to the macOS menu bar glyph: only the 5-hour session
+/// percentage, e.g. "45%". Respects the user's used/remaining preference via
+/// `display_pct`. Weekly is intentionally omitted here — it lives in the panel.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn tray_title(snapshot: &UsageSnapshot, settings: &Settings) -> String {
     match &snapshot.mode {
-        DisplayMode::Session { primary, secondary } => {
-            let p = settings.display_pct(primary.utilization).round() as i32;
-            match secondary {
-                Some(s) => format!("{p}·{}", settings.display_pct(s.utilization).round() as i32),
-                None => format!("{p}"),
-            }
+        DisplayMode::Session { primary, .. } => {
+            format!("{}%", settings.display_pct(primary.utilization).round() as i32)
         }
         DisplayMode::SpendCap { utilization, .. } => {
             format!("{}%", settings.display_pct(*utilization).round() as i32)
@@ -270,6 +349,9 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) 
     tauri::async_runtime::spawn(async move {
         match id.as_str() {
             ids::QUIT => {
+                // Mark the exit as intentional so the ExitRequested guard
+                // doesn't veto it, then tear the process down.
+                QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
                 app.exit(0);
             }
             ids::REFRESH => {
@@ -281,6 +363,10 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) 
                 }
                 update_tray(&app, &settings).await;
                 let _ = app.emit("usage-updated", ());
+            }
+            ids::OPEN_TERMINAL => {
+                let terminal = app.state::<AppState>().settings.lock().await.default_terminal;
+                launch_terminal(terminal);
             }
             ids::SETTINGS => {
                 if let Some(win) = app.get_webview_window("settings") {

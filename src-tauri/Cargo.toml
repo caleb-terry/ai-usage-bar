@@ -19,10 +19,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
 tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-store = "2"
+tauri-plugin-notification = "2"
 
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
@@ -48,6 +49,11 @@ imageproc = "0.25"
 
 [target.'cfg(windows)'.dependencies]
 windows-registry = "0.5"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Real NSVisualEffectView vibrancy behind the floating panel so it reads as a
+# Tahoe "liquid glass" surface rather than a flat opaque card.
+window-vibrancy = "0.6"
 
 [features]
 # This feature is used for production builds or when a dev server is not specified, DO NOT REMOVE!!

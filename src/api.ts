@@ -6,6 +6,8 @@ import { invoke } from "@tauri-apps/api/core";
 export type ProviderId = "claude" | "codex";
 export type ActiveProvider = "auto" | "claude" | "codex";
 export type DisplayStyle = "numbers" | "bars";
+export type Language = "system" | "en";
+export type TerminalApp = "terminal" | "iterm" | "warp" | "ghostty";
 
 export interface WindowUsage {
   utilization: number;
@@ -29,6 +31,8 @@ export interface DetailExtras {
   credit_balance_cents?: number;
   code_review_utilization?: number;
   on_demand_resets?: number;
+  extra_usage_used_cents?: number;
+  extra_usage_cap_cents?: number;
 }
 
 export interface UsageSnapshot {
@@ -54,6 +58,13 @@ export interface Settings {
   thresholds: Thresholds;
   windows_float_panel: boolean;
   launch_at_login: boolean;
+  language: Language;
+  default_terminal: TerminalApp;
+  show_cost_summary: boolean;
+  cost_history_days: number;
+  check_provider_status: boolean;
+  session_quota_notifications: boolean;
+  quota_warning_notifications: boolean;
 }
 
 export interface UsageReport {
@@ -67,10 +78,24 @@ export const setSettings = (settings: Settings) =>
   invoke<void>("set_settings", { settings });
 export const getUsage = () => invoke<UsageReport>("get_usage");
 export const refreshNow = () => invoke<UsageReport>("refresh_now");
+export const openTerminal = () => invoke<void>("open_terminal");
 
 export const PROVIDER_LABEL: Record<ProviderId, string> = {
   claude: "Claude Code",
   codex: "Codex",
+};
+
+/// Short label used on the compact tab chips.
+export const PROVIDER_TAB_LABEL: Record<ProviderId, string> = {
+  claude: "Claude",
+  codex: "Codex",
+};
+
+/// Per-provider brand accent. Drives the tab underline and the hero card's
+/// fill, so the panel reads at a glance which provider you're looking at.
+export const PROVIDER_ACCENT: Record<ProviderId, string> = {
+  claude: "#d97757",
+  codex: "#10a37f",
 };
 
 /// Pick a threshold color for a utilization percentage.
@@ -100,4 +125,18 @@ export function formatReset(iso?: string): string | null {
   }
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
+}
+
+/// Format a past timestamp as a relative "7m ago" / "2h ago" / "3d ago".
+/// Returns null for missing/invalid input so callers can omit the line.
+export function formatRelative(iso?: string): string | null {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(ms)) return null;
+  if (ms < 60000) return "just now";
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const h = Math.floor(mins / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }

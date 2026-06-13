@@ -1,0 +1,6 @@
+# macOS dev signing: run the linked binary through sign-and-run.sh so every
+# `cargo run` (and thus `tauri dev`) build is signed with a stable identity.
+# This keeps the Keychain "Always Allow" grant for the Claude/Codex credential
+# items from being invalidated on each recompile. See scripts/sign-and-run.sh.
+[target.aarch64-apple-darwin]
+runner = "scripts/sign-and-run.sh"

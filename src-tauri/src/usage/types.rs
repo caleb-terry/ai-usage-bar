@@ -119,6 +119,14 @@ pub struct DetailExtras {
     /// Number of available on-demand resets (Codex).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on_demand_resets: Option<u32>,
+    /// Extra-usage spend against the monthly cap (Claude), in cents. Surfaced
+    /// alongside the session bars so spend is visible without losing the
+    /// windows; the icon never shows this.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra_usage_used_cents: Option<u64>,
+    /// Monthly extra-usage spend cap (Claude), in cents.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra_usage_cap_cents: Option<u64>,
 }
 
 /// A fully normalized snapshot of one provider's usage at a point in time.

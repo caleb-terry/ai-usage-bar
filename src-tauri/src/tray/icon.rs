@@ -8,9 +8,14 @@ use crate::settings::{DisplayStyle, Settings, Thresholds};
 use crate::tray::theme::Appearance;
 use crate::usage::types::{DisplayMode, ProviderId, UsageSnapshot};
 use ab_glyph::{Font, FontRef, PxScale};
-use image::{Rgba, RgbaImage};
+use image::{imageops, Rgba, RgbaImage};
 
 const SIZE: u32 = 36;
+
+/// Square size of the provider-glyph tray icon. The menu bar renders this
+/// alongside the percentage *title* (see `update_tray`), matching the reference
+/// of "provider mark + 5h %".
+const GLYPH_SIZE: u32 = 36;
 
 /// Embedded compact font for number rendering.
 static FONT_BYTES: &[u8] = include_bytes!("../../assets/fonts/Inter-Bold.ttf");
@@ -24,6 +29,7 @@ pub struct RenderedIcon {
     pub is_template: bool,
 }
 
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn threshold_color(util: f32, t: &Thresholds) -> Rgba<u8> {
     if util >= t.danger {
         Rgba([0xD9, 0x4A, 0x3A, 0xFF]) // red
@@ -35,6 +41,11 @@ fn threshold_color(util: f32, t: &Thresholds) -> Rgba<u8> {
 }
 
 /// Render the tray icon for the active provider's snapshot.
+///
+/// Used on Windows/Linux, which have no separate tray title — the percentage is
+/// baked into the bitmap. macOS instead uses `render_provider_glyph` + a text
+/// title, so this whole path (and its helpers) is dead code there.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn render_icon(
     snapshot: &UsageSnapshot,
     settings: &Settings,
@@ -60,8 +71,60 @@ pub fn render_icon(
     }
 }
 
+/// Raw provider-mark PNG (white-on-transparent or color) used as the source for
+/// the template glyph. We only consume its alpha channel, so the fill color
+/// doesn't matter — the silhouette is what we tint.
+fn provider_glyph_png(provider: ProviderId) -> &'static [u8] {
+    match provider {
+        ProviderId::Claude => include_bytes!("../../icons/providers/claude-color.png"),
+        ProviderId::Codex => include_bytes!("../../icons/providers/codex-white.png"),
+    }
+}
+
+/// Render the active provider's logo as a monochrome template glyph for the menu
+/// bar. The PNG's alpha channel is used as a mask and painted in the foreground
+/// color; on macOS the result is flagged as a template so the system tints it
+/// for light/dark menu bars. The 5h percentage is shown separately as the tray
+/// *title* (see `update_tray`), so this icon carries no text.
+pub fn render_provider_glyph(provider: ProviderId, appearance: Appearance) -> RenderedIcon {
+    let fg = appearance.foreground();
+    let mut out = RgbaImage::new(GLYPH_SIZE, GLYPH_SIZE);
+
+    if let Ok(src) = image::load_from_memory(provider_glyph_png(provider)) {
+        // Fit the mark inside a small inset so it reads cleanly at menu-bar size.
+        let inset = 3u32;
+        let target = GLYPH_SIZE - inset * 2;
+        let scaled = imageops::resize(
+            &src.to_rgba8(),
+            target,
+            target,
+            imageops::FilterType::Lanczos3,
+        );
+        for (x, y, px) in scaled.enumerate_pixels() {
+            let alpha = px.0[3];
+            if alpha == 0 {
+                continue;
+            }
+            out.put_pixel(
+                x + inset,
+                y + inset,
+                Rgba([fg[0], fg[1], fg[2], alpha]),
+            );
+        }
+    }
+
+    RenderedIcon {
+        rgba: out.into_raw(),
+        width: GLYPH_SIZE,
+        height: GLYPH_SIZE,
+        // Template on macOS so the system handles light/dark inversion.
+        is_template: cfg!(target_os = "macos"),
+    }
+}
+
 /// Two stacked horizontal bars (primary on top, secondary below), each colored
 /// by its own utilization. Spend-cap renders a single centered bar.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn render_bars(img: &mut RgbaImage, snapshot: &UsageSnapshot, settings: &Settings) {
     let track = Rgba([0x44, 0x44, 0x44, 0xFF]);
     let pad = 4u32;
@@ -106,6 +169,7 @@ fn render_bars(img: &mut RgbaImage, snapshot: &UsageSnapshot, settings: &Setting
 }
 
 /// Compact two-line numbers, e.g. "42" over "18". Spend-cap shows a single value.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn render_numbers(
     img: &mut RgbaImage,
     snapshot: &UsageSnapshot,
@@ -142,6 +206,7 @@ fn render_numbers(
     }
 }
 
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn fill_rect(img: &mut RgbaImage, x: u32, y: u32, w: u32, h: u32, color: Rgba<u8>) {
     for dy in 0..h {
         for dx in 0..w {
@@ -154,6 +219,7 @@ fn fill_rect(img: &mut RgbaImage, x: u32, y: u32, w: u32, h: u32, color: Rgba<u8
     }
 }
 
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn draw_text_centered(
     img: &mut RgbaImage,
     font: &FontRef,
@@ -195,6 +261,7 @@ fn draw_text_centered(
     }
 }
 
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn blend_pixel(img: &mut RgbaImage, x: u32, y: u32, color: Rgba<u8>, coverage: f32) {
     let a = coverage.clamp(0.0, 1.0);
     let existing = img.get_pixel(x, y).0;
@@ -207,6 +274,7 @@ fn blend_pixel(img: &mut RgbaImage, x: u32, y: u32, color: Rgba<u8>, coverage: f
     img.put_pixel(x, y, Rgba(out));
 }
 
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn blend(bg: u8, fg: u8, a: f32) -> u8 {
     ((bg as f32) * (1.0 - a) + (fg as f32) * a).round() as u8
 }
