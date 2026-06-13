@@ -70,20 +70,28 @@ impl NotifyState {
             let mut next = ProviderState::default();
 
             // --- session-exhaustion (5h window hits 0% remaining) ---
+            // `None` means no session window this tick (signed out, API-key mode,
+            // etc.). In that case we carry the previous exhausted flag forward
+            // rather than treating absent data as "recovered" — otherwise losing
+            // the window would fire a spurious "quota available" notification.
             let session_util = match &snap.mode {
                 DisplayMode::Session { primary, .. } => Some(primary.utilization),
                 _ => None,
             };
-            next.session_exhausted = session_util.map(|u| u >= 100.0).unwrap_or(false);
+            next.session_exhausted = match session_util {
+                Some(u) => u >= 100.0,
+                None => prev.session_exhausted,
+            };
 
             if settings.session_quota_notifications {
                 if next.session_exhausted && !prev.session_exhausted {
                     out.push(Notification {
                         title: format!("{} session quota reached", snap.provider.label()),
-                        body: "The 5-hour session limit is at 0%. It'll reset soon."
-                            .to_string(),
+                        body: "The 5-hour session limit is at 0%. It'll reset soon.".to_string(),
                     });
-                } else if !next.session_exhausted && prev.session_exhausted {
+                } else if prev.session_exhausted && session_util.map(|u| u < 100.0).unwrap_or(false)
+                {
+                    // Only a real, observed sub-100% reading counts as recovery.
                     out.push(Notification {
                         title: format!("{} session quota available", snap.provider.label()),
                         body: "Your 5-hour session limit has reset.".to_string(),
@@ -160,15 +168,21 @@ mod tests {
         let mut state = NotifyState::default();
 
         // Below warn: nothing.
-        assert!(state.evaluate(&settings, &map(session_snap(20.0))).is_empty());
+        assert!(state
+            .evaluate(&settings, &map(session_snap(20.0)))
+            .is_empty());
         // Crosses warn: one notification.
         assert_eq!(state.evaluate(&settings, &map(session_snap(60.0))).len(), 1);
         // Still in warn band: nothing (edge-triggered).
-        assert!(state.evaluate(&settings, &map(session_snap(65.0))).is_empty());
+        assert!(state
+            .evaluate(&settings, &map(session_snap(65.0)))
+            .is_empty());
         // Crosses into danger: one more.
         assert_eq!(state.evaluate(&settings, &map(session_snap(90.0))).len(), 1);
         // Still danger: nothing.
-        assert!(state.evaluate(&settings, &map(session_snap(95.0))).is_empty());
+        assert!(state
+            .evaluate(&settings, &map(session_snap(95.0)))
+            .is_empty());
     }
 
     #[test]
@@ -181,8 +195,27 @@ mod tests {
         let exhausted = state.evaluate(&settings, &map(session_snap(100.0)));
         assert_eq!(exhausted.len(), 1);
         // Still exhausted: no repeat.
-        assert!(state.evaluate(&settings, &map(session_snap(100.0))).is_empty());
+        assert!(state
+            .evaluate(&settings, &map(session_snap(100.0)))
+            .is_empty());
         // Recovers: one "available" notification.
+        let recovered = state.evaluate(&settings, &map(session_snap(10.0)));
+        assert_eq!(recovered.len(), 1);
+    }
+
+    #[test]
+    fn losing_session_window_does_not_fire_recovery() {
+        // Regression: an exhausted provider that stops returning a session
+        // window (sign-out / API-key mode) must NOT emit a "quota available"
+        // notification — absent data is not observed recovery.
+        let mut settings = Settings::default();
+        settings.quota_warning_notifications = false;
+        let mut state = NotifyState::default();
+
+        state.evaluate(&settings, &map(session_snap(100.0))); // exhausted
+        let no_window = UsageSnapshot::unauthenticated(ProviderId::Claude, Utc::now());
+        assert!(state.evaluate(&settings, &map(no_window)).is_empty());
+        // And it stays exhausted: a later real sub-100% reading still recovers.
         let recovered = state.evaluate(&settings, &map(session_snap(10.0)));
         assert_eq!(recovered.len(), 1);
     }
@@ -193,7 +226,11 @@ mod tests {
         settings.quota_warning_notifications = false;
         settings.session_quota_notifications = false;
         let mut state = NotifyState::default();
-        assert!(state.evaluate(&settings, &map(session_snap(95.0))).is_empty());
-        assert!(state.evaluate(&settings, &map(session_snap(100.0))).is_empty());
+        assert!(state
+            .evaluate(&settings, &map(session_snap(95.0)))
+            .is_empty());
+        assert!(state
+            .evaluate(&settings, &map(session_snap(100.0)))
+            .is_empty());
     }
 }

@@ -268,6 +268,58 @@
   background: var(--codex);
   border: 1px solid var(--border);
 }
+.provider-dot.openrouter { background: #6566f1; }
+.provider-dot.elevenlabs { background: #000; border: 1px solid var(--border); }
+.provider-dot.groq { background: #f55036; }
+.provider-dot.deepgram { background: #13ef93; }
+.provider-dot.zai { background: #3b82f6; }
+.provider-dot.minimax { background: #ff4f4f; }
+.provider-dot.gemini { background: #4285f4; }
+.provider-dot.grok { background: #1a1a1a; border: 1px solid var(--border); }
+.provider-dot.deepseek { background: #4d6bfe; }
+.provider-dot.moonshot { background: #16191e; border: 1px solid var(--border); }
+.provider-dot.mistral { background: #fa520f; }
+.provider-dot.perplexity { background: #20808d; }
+
+/* ---- API-key provider rows ---- */
+.apikey-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+}
+.apikey-input {
+  display: flex;
+  gap: 6px;
+  padding-left: 17px; /* align under the provider label, past the dot */
+}
+.apikey-input input {
+  flex: 1;
+  padding: 6px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.apikey-input button {
+  padding: 6px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.apikey-input button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.apikey-input .apikey-clear {
+  color: var(--danger);
+}
 
 .status {
   font-size: 11px;

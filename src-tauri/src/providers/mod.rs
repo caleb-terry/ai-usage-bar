@@ -2,8 +2,10 @@
 //! credentials, refresh tokens when needed, fetch usage, and normalize the
 //! response into a [`UsageSnapshot`].
 
+pub mod api_key;
 pub mod claude;
 pub mod codex;
+pub mod credits;
 
 use crate::usage::types::{ProviderId, UsageSnapshot};
 use async_trait::async_trait;
@@ -67,6 +69,7 @@ pub async fn fetch_once(id: ProviderId) -> ProviderResult<UsageSnapshot> {
     let provider: Box<dyn Provider> = match id {
         ProviderId::Claude => Box::new(claude::ClaudeProvider::new(http)),
         ProviderId::Codex => Box::new(codex::CodexProvider::new(http)),
+        other => Box::new(credits::CreditsProvider::new(http, other)),
     };
     provider.fetch().await
 }

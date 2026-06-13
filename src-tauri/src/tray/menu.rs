@@ -21,10 +21,15 @@ pub mod ids {
 }
 
 /// Build the full context menu reflecting the current settings as checkmarks.
+///
+/// `incident_line` is an optional service-status note (e.g.
+/// "⚠ OpenAI: Partial Outage") rendered as a second, disabled header row when a
+/// provider is reporting an incident.
 pub fn build_menu<R: Runtime>(
     app: &AppHandle<R>,
     settings: &Settings,
     status_line: &str,
+    incident_line: Option<&str>,
 ) -> tauri::Result<Menu<R>> {
     // Non-interactive status header (e.g. "Claude Code · max · 5h 42% · Wk 18%").
     let header = MenuItemBuilder::with_id("header", status_line)
@@ -73,13 +78,19 @@ pub fn build_menu<R: Runtime>(
         .build(app)?;
 
     let refresh = MenuItemBuilder::with_id(ids::REFRESH, "Refresh now").build(app)?;
-    let open_terminal =
-        MenuItemBuilder::with_id(ids::OPEN_TERMINAL, "Open Terminal").build(app)?;
+    let open_terminal = MenuItemBuilder::with_id(ids::OPEN_TERMINAL, "Open Terminal").build(app)?;
     let settings_item = MenuItemBuilder::with_id(ids::SETTINGS, "Settings…").build(app)?;
     let quit = MenuItemBuilder::with_id(ids::QUIT, "Quit AI Usage Bar").build(app)?;
 
-    let menu = MenuBuilder::new(app)
-        .item(&header)
+    let mut builder = MenuBuilder::new(app).item(&header);
+    if let Some(line) = incident_line {
+        let incident = MenuItemBuilder::with_id("incident", line)
+            .enabled(false)
+            .build(app)?;
+        builder = builder.item(&incident);
+    }
+
+    let menu = builder
         .separator()
         .item(&provider_submenu)
         .item(&style_submenu)

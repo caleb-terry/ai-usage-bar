@@ -15,6 +15,12 @@ rust-version = "1.77"
 name = "ai_usage_bar_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# Standalone CLI that mirrors the menu bar app's data (usage/cost/config) for
+# scripts and CI, reusing the lib's provider/cost/status code.
+[[bin]]
+name = "aiusagebar"
+path = "src/bin/cli.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

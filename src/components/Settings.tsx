@@ -2,10 +2,13 @@ import { ReactNode, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   ActiveProvider,
+  API_KEY_PROVIDERS,
+  apiKeyStatus,
   DisplayStyle,
   Language,
   PROVIDER_LABEL,
   ProviderId,
+  setApiKey,
   Settings as SettingsType,
   TerminalApp,
   UsageReport,
@@ -255,25 +258,126 @@ function ProvidersTab({
   };
 
   return (
-    <Section title={t.sectionConnections}>
-      {PROVIDERS.map((id) => {
-        const st = statusFor(id);
-        return (
-          <Toggle
+    <>
+      <Section title={t.sectionConnections}>
+        {PROVIDERS.map((id) => {
+          const st = statusFor(id);
+          return (
+            <Toggle
+              key={id}
+              title={
+                <span className="provider-title">
+                  <span className={`provider-dot ${id}`} aria-hidden />
+                  {PROVIDER_LABEL[id]}
+                  <span className={`status status-${st.tone}`}>{st.text}</span>
+                </span>
+              }
+              checked={s.enabled_providers.includes(id)}
+              onChange={() => toggleProvider(id)}
+            />
+          );
+        })}
+      </Section>
+
+      <Section title={t.sectionApiKeyProviders}>
+        {API_KEY_PROVIDERS.map((id) => (
+          <ApiKeyProviderRow
             key={id}
-            title={
-              <span className="provider-title">
-                <span className={`provider-dot ${id}`} aria-hidden />
-                {PROVIDER_LABEL[id]}
-                <span className={`status status-${st.tone}`}>{st.text}</span>
-              </span>
-            }
-            checked={s.enabled_providers.includes(id)}
-            onChange={() => toggleProvider(id)}
+            id={id}
+            t={t}
+            enabled={s.enabled_providers.includes(id)}
+            onToggle={() => toggleProvider(id)}
           />
-        );
-      })}
-    </Section>
+        ))}
+      </Section>
+    </>
+  );
+}
+
+/// A single API-key provider: enable toggle + a password-style key field that
+/// shows whether a key is already stored (without ever revealing it).
+function ApiKeyProviderRow({
+  id,
+  t,
+  enabled,
+  onToggle,
+}: {
+  id: ProviderId;
+  t: Strings;
+  enabled: boolean;
+  onToggle: () => void;
+}) {
+  const [hasKey, setHasKey] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const refresh = async () => {
+    try {
+      const status = await apiKeyStatus();
+      setHasKey(!!status[id]);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const save = async (key: string) => {
+    setSaving(true);
+    try {
+      await setApiKey(id, key);
+      setDraft("");
+      await refresh();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="apikey-row">
+      <Toggle
+        title={
+          <span className="provider-title">
+            <span className={`provider-dot ${id}`} aria-hidden />
+            {PROVIDER_LABEL[id]}
+            <span className={`status status-${hasKey ? "ok" : "dim"}`}>
+              {hasKey ? t.statusKeyStored : t.statusNoKey}
+            </span>
+          </span>
+        }
+        checked={enabled}
+        onChange={onToggle}
+      />
+      <div className="apikey-input">
+        <input
+          type="password"
+          placeholder={hasKey ? "••••••••  (stored)" : t.apiKeyPlaceholder}
+          value={draft}
+          disabled={saving}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && draft.trim()) save(draft.trim());
+          }}
+        />
+        <button
+          disabled={saving || !draft.trim()}
+          onClick={() => save(draft.trim())}
+        >
+          {t.apiKeySave}
+        </button>
+        {hasKey && (
+          <button
+            className="apikey-clear"
+            disabled={saving}
+            onClick={() => save("")}
+          >
+            {t.apiKeyClear}
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 

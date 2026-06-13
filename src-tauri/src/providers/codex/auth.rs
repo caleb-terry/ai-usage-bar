@@ -110,18 +110,28 @@ pub fn load_credentials() -> ProviderResult<CodexCredentials> {
         }
     }
 
-    // Keyring fallback (macOS).
-    if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, &whoami_account()) {
-        if let Ok(secret) = entry.get_password() {
-            if let Ok(creds) = parse(&secret, CredentialSource::Keyring) {
-                if creds.access_token.is_some() || creds.api_key.is_some() {
-                    return Ok(creds);
+    // Keyring fallback (macOS). Skipped when AIUSAGEBAR_NO_KEYCHAIN is set so
+    // the unsigned CLI doesn't block on a SecurityAgent prompt.
+    if !keychain_disabled() {
+        if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, &whoami_account()) {
+            if let Ok(secret) = entry.get_password() {
+                if let Ok(creds) = parse(&secret, CredentialSource::Keyring) {
+                    if creds.access_token.is_some() || creds.api_key.is_some() {
+                        return Ok(creds);
+                    }
                 }
             }
         }
     }
 
     Err(ProviderError::Unauthenticated)
+}
+
+/// Whether Keychain access is disabled via the `AIUSAGEBAR_NO_KEYCHAIN` env var.
+fn keychain_disabled() -> bool {
+    std::env::var("AIUSAGEBAR_NO_KEYCHAIN")
+        .map(|v| v != "0" && !v.is_empty())
+        .unwrap_or(false)
 }
 
 fn whoami_account() -> String {

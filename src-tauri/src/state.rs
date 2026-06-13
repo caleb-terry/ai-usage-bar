@@ -2,6 +2,7 @@
 
 use crate::notify::NotifyState;
 use crate::settings::Settings;
+use crate::status::Incident;
 use crate::usage::aggregator::Aggregator;
 use tokio::sync::Mutex;
 
@@ -10,8 +11,11 @@ pub struct AppState {
     pub aggregator: Mutex<Aggregator>,
     /// Per-provider memory for edge-triggered quota notifications.
     pub notify: Mutex<NotifyState>,
-    /// Shared HTTP client; retained for ad-hoc fetches (e.g. manual re-auth).
-    #[allow(dead_code)]
+    /// Latest provider service-status incidents, refreshed by the poll loop
+    /// when `check_provider_status` is enabled. Empty when disabled or all
+    /// providers are operational.
+    pub incidents: Mutex<Vec<Incident>>,
+    /// Shared HTTP client, used for status polling and ad-hoc fetches.
     pub http: reqwest::Client,
 }
 
@@ -21,6 +25,7 @@ impl AppState {
             settings: Mutex::new(settings),
             aggregator: Mutex::new(aggregator),
             notify: Mutex::new(NotifyState::default()),
+            incidents: Mutex::new(Vec::new()),
             http,
         }
     }

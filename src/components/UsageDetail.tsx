@@ -1,14 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
+  CostSummary,
   PROVIDER_ACCENT,
+  PROVIDER_LABEL,
   PROVIDER_TAB_LABEL,
   ProviderId,
+  getCostSummary,
   getUsage,
   openTerminal,
   refreshNow,
+  severityColor,
   UsageReport,
 } from "../api";
+import CostFooter from "./CostFooter";
 import ProviderGlyph from "./ProviderGlyph";
 import SnapshotCard from "./SnapshotCard";
 import "../styles/panel.css";
@@ -20,12 +25,15 @@ type Tab = "overview" | ProviderId;
 /// each enabled provider rendered as a brand-colored hero card.
 export default function UsageDetail() {
   const [report, setReport] = useState<UsageReport | null>(null);
+  const [cost, setCost] = useState<CostSummary | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
 
   const load = async () => {
     try {
-      setReport(await getUsage());
+      const [r, c] = await Promise.all([getUsage(), getCostSummary()]);
+      setReport(r);
+      setCost(c);
     } catch (e) {
       console.error(e);
     }
@@ -42,7 +50,9 @@ export default function UsageDetail() {
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      setReport(await refreshNow());
+      const [r, c] = await Promise.all([refreshNow(), getCostSummary()]);
+      setReport(r);
+      setCost(c);
     } finally {
       setRefreshing(false);
     }
@@ -73,6 +83,11 @@ export default function UsageDetail() {
 
   const { snapshots, settings } = report;
   const tabs: Tab[] = ["overview", ...providers];
+  // Active incidents, worst first, so the banner leads with the most serious.
+  const rank = { critical: 3, major: 2, minor: 1, none: 0 } as const;
+  const activeIncidents = (report.incidents ?? [])
+    .filter((i) => i.severity !== "none")
+    .sort((a, b) => rank[b.severity] - rank[a.severity]);
 
   return (
     <div className="panel" data-tauri-drag-region>
@@ -101,6 +116,22 @@ export default function UsageDetail() {
       </nav>
 
       <div className="panel-scroll">
+        {activeIncidents.length > 0 && (
+          <div className="incident-banner">
+            {activeIncidents.map((i) => (
+              <div
+                key={i.provider}
+                className="incident-row"
+                style={{ ["--incident-color" as string]: severityColor(i.severity) }}
+              >
+                <span className="incident-dot" />
+                <span className="incident-text">
+                  {PROVIDER_LABEL[i.provider]}: {i.description}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
         {tab === "overview" ? (
           <div className="panel-cards">
             {providers.map((id, i) => {
@@ -117,6 +148,7 @@ export default function UsageDetail() {
             {providers.length === 0 && (
               <p className="empty-state">No providers enabled.</p>
             )}
+            {cost && providers.length > 0 && <CostFooter summary={cost} />}
           </div>
         ) : (
           <div className="panel-cards">
@@ -127,6 +159,7 @@ export default function UsageDetail() {
                 hero
               />
             )}
+            {cost && <CostFooter summary={cost} focus={tab} />}
           </div>
         )}
       </div>

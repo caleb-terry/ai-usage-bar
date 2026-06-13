@@ -57,7 +57,6 @@
     "longDescription": "A lightweight cross-platform menu bar / system tray monitor that surfaces your Claude Code and OpenAI Codex usage limits (5-hour and weekly windows, or spend caps) at a glance. Reads local CLI OAuth credentials read-only; no telemetry.",
     "macOS": {
       "minimumSystemVersion": "11.0",
-      "signingIdentity": "Apple Development: calebcterry@outlook.com (2A4LGY86EP)",
       "entitlements": "Entitlements.plist"
     },
     "windows": {

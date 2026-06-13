@@ -8,13 +8,19 @@
 // fallbacks. Imported behind `import.meta.env.DEV` in main.tsx, so it never
 // ships in the Tauri/production bundle.
 
-import type { Settings, UsageReport, UsageSnapshot } from "../api";
+import type {
+  CostSummary,
+  Incident,
+  Settings,
+  UsageReport,
+  UsageSnapshot,
+} from "../api";
 
 const hoursFromNow = (h: number) =>
   new Date(Date.now() + h * 3600 * 1000).toISOString();
 
 let settings: Settings = {
-  enabled_providers: ["claude", "codex"],
+  enabled_providers: ["claude", "codex", "openrouter", "elevenlabs"],
   active_provider: "auto",
   display_style: "bars",
   show_remaining: true,
@@ -64,12 +70,94 @@ function snapshots(jitter = 0): Record<string, UsageSnapshot> {
         extra_usage_cap_cents: 5000,
       },
     },
+    openrouter: {
+      provider: "openrouter",
+      plan_label: "credits",
+      stale: false,
+      fetched_at: hoursFromNow(0),
+      mode: { kind: "api_key_only" },
+      extras: { credit_balance_cents: 1850 + jitter * 5 },
+    },
+    elevenlabs: {
+      provider: "elevenlabs",
+      plan_label: "creator",
+      stale: false,
+      fetched_at: hoursFromNow(0),
+      mode: {
+        kind: "session",
+        primary: {
+          utilization: Math.min(100, 42 + jitter * 6),
+          reset_at: hoursFromNow(240),
+          label: "Chars",
+        },
+      },
+      extras: {},
+    },
   };
+}
+
+// Mock API-key store: which credit providers have a key. set_api_key mutates it.
+const apiKeys: Record<string, boolean> = {
+  openrouter: true,
+  elevenlabs: true,
+  groq: false,
+  deepgram: false,
+  zai: false,
+  minimax: false,
+  gemini: false,
+  grok: false,
+  deepseek: false,
+  moonshot: false,
+  mistral: false,
+  perplexity: false,
+};
+
+// Mock incidents: only when status checking is on. Shows one minor Codex
+// incident so the preview can exercise the banner; cleared on later refreshes
+// to also exercise the resolved path.
+function incidents(): Incident[] {
+  if (!settings.check_provider_status) return [];
+  if (refreshTick % 2 === 1) return [];
+  return [{ provider: "codex", severity: "minor", description: "Degraded Performance" }];
 }
 
 let refreshTick = 0;
 function report(): UsageReport {
-  return { snapshots: snapshots(refreshTick), active: "codex", settings };
+  return {
+    snapshots: snapshots(refreshTick),
+    active: "codex",
+    settings,
+    incidents: incidents(),
+  };
+}
+
+// Mock local cost summary, scaled lightly by the refresh tick so Refresh moves
+// the numbers. Returns null when the user disabled the cost summary, matching
+// the real `get_cost_summary` command.
+function costSummary(): CostSummary | null {
+  if (!settings.show_cost_summary) return null;
+  const bump = 1 + refreshTick * 0.04;
+  const claudeToday = 144.19 * bump;
+  const codexToday = 6.4 * bump;
+  return {
+    window_days: settings.cost_history_days,
+    total_today_usd: claudeToday + codexToday,
+    total_window_usd: 6755.39 + 537.52,
+    providers: {
+      claude: {
+        today_usd: claudeToday,
+        today_tokens: 58_533_609,
+        window_usd: 6755.39,
+        window_tokens: 3_053_017_278,
+      },
+      codex: {
+        today_usd: codexToday,
+        today_tokens: 4_120_500,
+        window_usd: 537.52,
+        window_tokens: 731_618_856,
+      },
+    },
+  };
 }
 
 // --- event plumbing -------------------------------------------------------
@@ -95,6 +183,17 @@ async function invoke(cmd: string, args: Record<string, unknown> = {}): Promise<
     case "refresh_now":
       if (cmd === "refresh_now") refreshTick += 1;
       return report();
+    case "get_cost_summary":
+      return costSummary();
+    case "api_key_status":
+      return { ...apiKeys };
+    case "set_api_key": {
+      const provider = args.provider as string;
+      const key = (args.key as string) ?? "";
+      apiKeys[provider] = key.trim().length > 0;
+      queueMicrotask(() => dispatch("usage-updated", null));
+      return null;
+    }
     case "get_settings":
       return settings;
     case "set_settings":

@@ -45,6 +45,10 @@ pub enum TerminalApp {
     /// macOS Terminal.app / the platform default terminal.
     #[default]
     Terminal,
+    // kebab-case would serialize this as "i-term"; the frontend sends "iterm",
+    // so pin the wire value explicitly or the whole settings payload fails to
+    // deserialize when iTerm is selected.
+    #[serde(rename = "iterm")]
     ITerm,
     Warp,
     Ghostty,
@@ -115,7 +119,11 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            enabled_providers: ProviderId::ALL.to_vec(),
+            // Default to the two zero-config subscription providers (creds are
+            // auto-detected from the CLIs). API-key providers stay off until the
+            // user adds a key, so first run doesn't fetch six unauthenticated
+            // endpoints.
+            enabled_providers: vec![ProviderId::Claude, ProviderId::Codex],
             active_provider: ActiveProvider::Auto,
             display_style: DisplayStyle::Numbers,
             show_remaining: false,

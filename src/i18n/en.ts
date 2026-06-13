@@ -18,6 +18,7 @@ export const en = {
   sectionUsage: "Usage",
   sectionAutomation: "Automation",
   sectionConnections: "Connections",
+  sectionApiKeyProviders: "API key providers",
   sectionTray: "Tray",
   sectionThresholds: "Thresholds",
   sectionPlatform: "Platform",
@@ -74,6 +75,11 @@ export const en = {
   statusApiKey: "API key mode",
   statusConnected: "Connected",
   statusConnectedStale: "Connected (stale)",
+  statusKeyStored: "Key stored",
+  statusNoKey: "No key",
+  apiKeyPlaceholder: "Paste API key",
+  apiKeySave: "Save",
+  apiKeyClear: "Clear",
 
   // Display
   activeProvider: "Active provider",

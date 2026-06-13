@@ -120,13 +120,17 @@ export default function SnapshotCard({ snapshot, settings, hero }: Props) {
           />
         )}
 
-        {mode.kind === "unauthenticated" && (
-          <p className="empty-state">
-            Not signed in. Run{" "}
-            <code>{snapshot.provider === "claude" ? "claude" : "codex"}</code> in
-            a terminal to authenticate.
-          </p>
-        )}
+        {mode.kind === "unauthenticated" &&
+          (snapshot.provider === "claude" || snapshot.provider === "codex" ? (
+            <p className="empty-state">
+              Not signed in. Run <code>{snapshot.provider}</code> in a terminal
+              to authenticate.
+            </p>
+          ) : (
+            <p className="empty-state">
+              No API key. Add one in Settings → Providers.
+            </p>
+          ))}
 
         {mode.kind === "api_key_only" && (
           <p className="empty-state">

@@ -77,7 +77,9 @@ pub fn render_icon(
 fn provider_glyph_png(provider: ProviderId) -> &'static [u8] {
     match provider {
         ProviderId::Claude => include_bytes!("../../icons/providers/claude-color.png"),
-        ProviderId::Codex => include_bytes!("../../icons/providers/codex-white.png"),
+        // API-key providers have no bundled brand mark yet; reuse the neutral
+        // Codex silhouette so the tray still renders a glyph.
+        _ => include_bytes!("../../icons/providers/codex-white.png"),
     }
 }
 
@@ -100,16 +102,26 @@ pub fn render_provider_glyph(provider: ProviderId, appearance: Appearance) -> Re
             target,
             imageops::FilterType::Lanczos3,
         );
+
+        // Some brand PNGs (e.g. claude-color.png) are fully opaque with the mark
+        // drawn in dark ink on a light field, so the alpha channel can't be used
+        // as a silhouette mask — it would paint the whole square. Detect that and
+        // fall back to a luminance-derived mask (dark pixels = mark) for opaque
+        // images, while transparent silhouettes (codex-*) keep using alpha.
+        let opaque = scaled.pixels().all(|p| p.0[3] == 255);
         for (x, y, px) in scaled.enumerate_pixels() {
-            let alpha = px.0[3];
-            if alpha == 0 {
+            let mask = if opaque {
+                // Rec. 601 luma; invert so dark ink → high coverage.
+                let [r, g, b, _] = px.0;
+                let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+                255u8.saturating_sub(luma.round() as u8)
+            } else {
+                px.0[3]
+            };
+            if mask == 0 {
                 continue;
             }
-            out.put_pixel(
-                x + inset,
-                y + inset,
-                Rgba([fg[0], fg[1], fg[2], alpha]),
-            );
+            out.put_pixel(x + inset, y + inset, Rgba([fg[0], fg[1], fg[2], mask]));
         }
     }
 
@@ -285,12 +297,8 @@ fn blend(bg: u8, fg: u8, a: f32) -> u8 {
 pub fn provider_logo_png(provider: ProviderId, appearance: Appearance) -> &'static [u8] {
     match (provider, appearance) {
         (ProviderId::Claude, _) => include_bytes!("../../icons/providers/claude-color.png"),
-        (ProviderId::Codex, Appearance::Light) => {
-            include_bytes!("../../icons/providers/codex-black.png")
-        }
-        (ProviderId::Codex, Appearance::Dark) => {
-            include_bytes!("../../icons/providers/codex-white.png")
-        }
+        (_, Appearance::Light) => include_bytes!("../../icons/providers/codex-black.png"),
+        (_, Appearance::Dark) => include_bytes!("../../icons/providers/codex-white.png"),
     }
 }
 

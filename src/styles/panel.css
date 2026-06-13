@@ -54,6 +54,9 @@
   color: var(--text-dim);
   border-radius: 8px 8px 0 0;
   transition: color 0.15s, background 0.15s;
+  /* The tab bar is a drag region; tabs must opt out or clicking one starts a
+     window drag in the Tauri webview instead of firing onClick. */
+  -webkit-app-region: no-drag;
 }
 .tab:hover {
   color: var(--text);
@@ -300,4 +303,89 @@
 .panel-actions button:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+/* ---- local cost summary footer ---- */
+.cost-footer {
+  margin-top: 4px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-elev) 55%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--panel-rim, rgba(255, 255, 255, 0.12));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.no-vibrancy .cost-footer {
+  background: var(--bg-elev);
+}
+
+.cost-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12px;
+}
+.cost-row .cost-label {
+  color: var(--text-dim);
+}
+.cost-row .cost-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--text);
+}
+.cost-row .cost-tokens {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.cost-total .cost-value {
+  font-size: 15px;
+  color: var(--cost-accent, var(--text));
+}
+
+.cost-breakdown {
+  grid-template-columns: auto 1fr auto auto;
+  font-size: 11px;
+  opacity: 0.92;
+}
+.cost-breakdown .cost-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cost-accent, var(--text-dim));
+  align-self: center;
+}
+.cost-breakdown .cost-value,
+.cost-breakdown .cost-tokens {
+  font-weight: 600;
+}
+
+/* ---- service-status incident banner ---- */
+.incident-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.incident-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  background: color-mix(in srgb, var(--incident-color, var(--warn)) 16%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--incident-color, var(--warn)) 45%, transparent);
+}
+.incident-row .incident-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--incident-color, var(--warn));
+  flex: none;
 }

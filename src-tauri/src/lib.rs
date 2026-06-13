@@ -5,22 +5,25 @@
 //! provider (user-selected or auto-picked by highest utilization).
 
 mod commands;
+pub mod cost;
 mod notify;
 pub mod providers;
-mod settings;
+pub mod settings;
 mod state;
+pub mod status;
 mod tray;
 pub mod usage;
 mod windows;
 
 use crate::providers::claude::ClaudeProvider;
 use crate::providers::codex::CodexProvider;
+use crate::providers::credits::CreditsProvider;
 use crate::providers::Provider;
 use crate::settings::{ActiveProvider, DisplayStyle, Settings};
 use crate::state::AppState;
 use crate::tray::menu::ids;
 use crate::usage::selector;
-use crate::usage::types::{DisplayMode, UsageSnapshot};
+use crate::usage::types::{DisplayMode, ProviderId, ProviderKind, UsageSnapshot};
 use std::sync::Arc;
 use tauri::image::Image;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -41,11 +44,19 @@ pub fn run() {
         .build()
         .expect("build http client");
 
-    // Build providers.
-    let provider_list: Vec<Arc<dyn Provider>> = vec![
+    // Build providers: the two OAuth subscription providers plus a generic
+    // API-key credits provider for every remaining `ProviderId`. Driving the
+    // API-key set off `ProviderId::ALL` keeps adding a provider to a single
+    // enum edit rather than a list mutation here.
+    let mut provider_list: Vec<Arc<dyn Provider>> = vec![
         Arc::new(ClaudeProvider::new(http.clone())),
         Arc::new(CodexProvider::new(http.clone())),
     ];
+    for id in ProviderId::ALL {
+        if id.kind() == ProviderKind::ApiKeyCredits {
+            provider_list.push(Arc::new(CreditsProvider::new(http.clone(), id)));
+        }
+    }
 
     // Load settings. On first run all providers are enabled by default; the
     // background poll loop classifies each as connected / sign-in-needed once
@@ -83,6 +94,9 @@ pub fn run() {
             commands::get_usage,
             commands::refresh_now,
             commands::open_terminal,
+            commands::get_cost_summary,
+            commands::set_api_key,
+            commands::api_key_status,
         ])
         .setup(|app| {
             // Build the initial menu/tray from settings loaded directly off
@@ -96,7 +110,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            let menu = tray::menu::build_menu(app.handle(), &initial_settings, "Loading…")?;
+            let menu = tray::menu::build_menu(app.handle(), &initial_settings, "Loading…", None)?;
 
             let _tray = TrayIconBuilder::with_id(TRAY_ID)
                 .icon(app.default_window_icon().unwrap().clone())
@@ -114,7 +128,9 @@ pub fn run() {
             // glass layer itself clips to the radius, so nothing pokes past it.
             #[cfg(target_os = "macos")]
             if let Some(panel) = app.get_webview_window("panel") {
-                use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
+                use window_vibrancy::{
+                    apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState,
+                };
                 let _ = apply_vibrancy(
                     &panel,
                     NSVisualEffectMaterial::Popover,
@@ -171,14 +187,15 @@ pub(crate) fn launch_terminal(terminal: crate::settings::TerminalApp) {
     #[cfg(target_os = "windows")]
     let result = {
         let _ = terminal; // app choice is macOS-only for now
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", "wt.exe"])
-            .spawn()
-            .or_else(|_| {
-                std::process::Command::new("cmd")
-                    .args(["/C", "start", "", "cmd.exe"])
-                    .spawn()
-            })
+                          // Spawn the executables directly rather than via `cmd /C start`. `start`
+                          // returns success as soon as the shell launches — even when `wt.exe` is
+                          // absent — so an `.or_else` chained on it would never reach the fallback.
+                          // Spawning the binary itself yields a real io::Result we can branch on.
+        std::process::Command::new("wt.exe").spawn().or_else(|_| {
+            std::process::Command::new("cmd.exe")
+                .args(["/C", "start", "", "cmd.exe"])
+                .spawn()
+        })
     };
 
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -218,8 +235,26 @@ async fn poll_loop<R: Runtime>(app: AppHandle<R>) {
             let pending = state.notify.lock().await.evaluate(&settings, &snapshots);
             for n in pending {
                 use tauri_plugin_notification::NotificationExt;
-                let _ = app.notification().builder().title(n.title).body(n.body).show();
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title(n.title)
+                    .body(n.body)
+                    .show();
             }
+        }
+
+        // Provider service-status polling (best-effort; never blocks usage).
+        // When disabled we clear any stale incidents so the badge disappears.
+        {
+            let state = app.state::<AppState>();
+            let incidents = if settings.check_provider_status {
+                let http = state.http.clone();
+                status::fetch_many(&http, &settings.enabled_providers).await
+            } else {
+                Vec::new()
+            };
+            *state.incidents.lock().await = incidents;
         }
 
         // Always refresh on the first pass; afterwards only when the active
@@ -276,8 +311,19 @@ async fn update_tray<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
 
     let _ = tray.set_tooltip(Some(tooltip(&snapshot, settings)));
 
+    // Format the worst active service incident, if any, as a second header row.
+    let incident_line = {
+        let incidents = state.incidents.lock().await;
+        status::worst(&incidents).map(|i| format!("⚠ {}: {}", i.provider.label(), i.description))
+    };
+
     // Rebuild the menu so checkmarks + status header stay current.
-    if let Ok(menu) = tray::menu::build_menu(app, settings, &status_line(&snapshot, settings)) {
+    if let Ok(menu) = tray::menu::build_menu(
+        app,
+        settings,
+        &status_line(&snapshot, settings),
+        incident_line.as_deref(),
+    ) {
         let _ = tray.set_menu(Some(menu));
     }
 }
@@ -289,7 +335,10 @@ async fn update_tray<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
 fn tray_title(snapshot: &UsageSnapshot, settings: &Settings) -> String {
     match &snapshot.mode {
         DisplayMode::Session { primary, .. } => {
-            format!("{}%", settings.display_pct(primary.utilization).round() as i32)
+            format!(
+                "{}%",
+                settings.display_pct(primary.utilization).round() as i32
+            )
         }
         DisplayMode::SpendCap { utilization, .. } => {
             format!("{}%", settings.display_pct(*utilization).round() as i32)
@@ -365,7 +414,12 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) 
                 let _ = app.emit("usage-updated", ());
             }
             ids::OPEN_TERMINAL => {
-                let terminal = app.state::<AppState>().settings.lock().await.default_terminal;
+                let terminal = app
+                    .state::<AppState>()
+                    .settings
+                    .lock()
+                    .await
+                    .default_terminal;
                 launch_terminal(terminal);
             }
             ids::SETTINGS => {
