@@ -40,7 +40,8 @@ cargo run --example live_fetch [Codex|codex]   # live fetch w/ your real creds, 
 - **Never read the macOS Keychain on the startup/`setup` path.** It blocks on the SecurityAgent permission dialog and can deadlock app launch. Credential reads (Codex token) must stay inside the async `fetch` path / `spawn_blocking`. `lib.rs` startup deliberately loads settings off disk without touching the credential store.
 - **Dev re-prompt loop:** `src-tauri/.cargo/config.toml` wires a `runner` (`scripts/sign-and-run.sh`) that re-signs each dev build with a *stable* Apple Development identity. Without it, every recompile changes the binary's code hash, macOS treats it as a new app, and you get re-prompted for Keychain access endlessly. Don't remove it.
 - **i18n** (`src/i18n/`) ships English only; `strings(language)` resolves the active locale, falling back to `navigator.language` when set to `System`. Add a locale = add a `Strings` record + a case; the structure is the extension point.
-- **GitHub Actions pnpm setup:** because `package.json` already pins `packageManager`, `pnpm/action-setup` must not also pass `version:`. Doing both fails the workflow with "Multiple versions of pnpm specified."
+- **GitHub Actions release setup:** because `package.json` already pins `packageManager`, `pnpm/action-setup` must not also pass `version:`. Doing both fails the workflow with "Multiple versions of pnpm specified." Tauri release asset naming uses `assetNamePattern` (not `releaseAssetNamePattern`).
+- **Multiple Rust binaries:** `src-tauri/Cargo.toml` needs `default-run = "ai-usage-bar"` because the package also ships the `aiusagebar` CLI. Without it, `pnpm tauri build` fails with "failed to find main binary."
 
 ## Code style
 
