@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Deliberately NOT sandboxed. The app reads the Claude/Codex CLI's Keychain
+      items (e.g. "Claude Code-credentials"), which live outside any app
+      sandbox; enabling com.apple.security.app-sandbox would block those reads.
+
+      Signing with a stable identity (see APPLE_SIGNING_IDENTITY) is what makes
+      the Keychain "Always Allow" grant persist across dev rebuilds — without a
+      stable signature macOS treats every rebuild as a new app and re-prompts.
+    -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>

@@ -8,20 +8,75 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// Identifies a usage provider.
+///
+/// Claude and Codex are subscription providers with OAuth session windows and
+/// (for those two) local cost logs + status pages. The remaining variants are
+/// API-key providers that report a purchased *credit balance* or spend, fetched
+/// from a single usage endpoint with a stored API key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderId {
     Claude,
     Codex,
+    OpenRouter,
+    ElevenLabs,
+    Groq,
+    Deepgram,
+    #[serde(rename = "zai")]
+    Zai,
+    MiniMax,
+    Gemini,
+    Grok,
+    DeepSeek,
+    Moonshot,
+    Mistral,
+    Perplexity,
+}
+
+/// Broad behavior class for a provider, so generic code (settings, cost, status)
+/// can branch on capability rather than enumerating every variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderKind {
+    /// OAuth subscription provider with session/weekly windows (Claude, Codex).
+    Subscription,
+    /// API-key provider reporting a credit balance / spend.
+    ApiKeyCredits,
 }
 
 impl ProviderId {
-    pub const ALL: [ProviderId; 2] = [ProviderId::Claude, ProviderId::Codex];
+    pub const ALL: [ProviderId; 14] = [
+        ProviderId::Claude,
+        ProviderId::Codex,
+        ProviderId::OpenRouter,
+        ProviderId::ElevenLabs,
+        ProviderId::Groq,
+        ProviderId::Deepgram,
+        ProviderId::Zai,
+        ProviderId::MiniMax,
+        ProviderId::Gemini,
+        ProviderId::Grok,
+        ProviderId::DeepSeek,
+        ProviderId::Moonshot,
+        ProviderId::Mistral,
+        ProviderId::Perplexity,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
             ProviderId::Claude => "claude",
             ProviderId::Codex => "codex",
+            ProviderId::OpenRouter => "openrouter",
+            ProviderId::ElevenLabs => "elevenlabs",
+            ProviderId::Groq => "groq",
+            ProviderId::Deepgram => "deepgram",
+            ProviderId::Zai => "zai",
+            ProviderId::MiniMax => "minimax",
+            ProviderId::Gemini => "gemini",
+            ProviderId::Grok => "grok",
+            ProviderId::DeepSeek => "deepseek",
+            ProviderId::Moonshot => "moonshot",
+            ProviderId::Mistral => "mistral",
+            ProviderId::Perplexity => "perplexity",
         }
     }
 
@@ -30,6 +85,25 @@ impl ProviderId {
         match self {
             ProviderId::Claude => "Claude Code",
             ProviderId::Codex => "Codex",
+            ProviderId::OpenRouter => "OpenRouter",
+            ProviderId::ElevenLabs => "ElevenLabs",
+            ProviderId::Groq => "Groq",
+            ProviderId::Deepgram => "Deepgram",
+            ProviderId::Zai => "z.ai",
+            ProviderId::MiniMax => "MiniMax",
+            ProviderId::Gemini => "Gemini",
+            ProviderId::Grok => "Grok",
+            ProviderId::DeepSeek => "DeepSeek",
+            ProviderId::Moonshot => "Moonshot",
+            ProviderId::Mistral => "Mistral",
+            ProviderId::Perplexity => "Perplexity",
+        }
+    }
+
+    pub fn kind(self) -> ProviderKind {
+        match self {
+            ProviderId::Claude | ProviderId::Codex => ProviderKind::Subscription,
+            _ => ProviderKind::ApiKeyCredits,
         }
     }
 }
@@ -119,6 +193,14 @@ pub struct DetailExtras {
     /// Number of available on-demand resets (Codex).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on_demand_resets: Option<u32>,
+    /// Extra-usage spend against the monthly cap (Claude), in cents. Surfaced
+    /// alongside the session bars so spend is visible without losing the
+    /// windows; the icon never shows this.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra_usage_used_cents: Option<u64>,
+    /// Monthly extra-usage spend cap (Claude), in cents.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra_usage_cap_cents: Option<u64>,
 }
 
 /// A fully normalized snapshot of one provider's usage at a point in time.

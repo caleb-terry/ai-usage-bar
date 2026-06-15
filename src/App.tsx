@@ -14,6 +14,10 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.dataset.view = view;
+    // Only macOS gets a real NSVisualEffectView behind the panel; everywhere
+    // else the panel must paint a solid fill instead of relying on vibrancy.
+    const isMac = navigator.userAgent.includes("Mac");
+    document.documentElement.classList.toggle("no-vibrancy", !isMac);
   }, [view]);
 
   return view === "settings" ? <Settings /> : <UsageDetail />;

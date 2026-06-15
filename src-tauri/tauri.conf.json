@@ -11,6 +11,7 @@
   },
   "app": {
     "withGlobalTauri": false,
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "settings",
@@ -25,8 +26,8 @@
       {
         "label": "panel",
         "title": "AI Usage Bar",
-        "width": 320,
-        "height": 360,
+        "width": 340,
+        "height": 560,
         "resizable": false,
         "decorations": false,
         "transparent": true,
@@ -55,7 +56,8 @@
     "shortDescription": "Claude Code + OpenAI Codex usage monitor.",
     "longDescription": "A lightweight cross-platform menu bar / system tray monitor that surfaces your Claude Code and OpenAI Codex usage limits (5-hour and weekly windows, or spend caps) at a glance. Reads local CLI OAuth credentials read-only; no telemetry.",
     "macOS": {
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "11.0",
+      "entitlements": "Entitlements.plist"
     },
     "windows": {
       "nsis": {

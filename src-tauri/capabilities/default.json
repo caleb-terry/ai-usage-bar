@@ -12,6 +12,7 @@
     "core:event:default",
     "positioner:default",
     "autostart:default",
-    "store:default"
+    "store:default",
+    "notification:default"
   ]
 }

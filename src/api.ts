@@ -3,9 +3,41 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
-export type ProviderId = "claude" | "codex";
+export type ProviderId =
+  | "claude"
+  | "codex"
+  | "openrouter"
+  | "elevenlabs"
+  | "groq"
+  | "deepgram"
+  | "zai"
+  | "minimax"
+  | "gemini"
+  | "grok"
+  | "deepseek"
+  | "moonshot"
+  | "mistral"
+  | "perplexity";
 export type ActiveProvider = "auto" | "claude" | "codex";
+
+/// API-key providers (everything except the two CLI subscription providers).
+export const API_KEY_PROVIDERS: ProviderId[] = [
+  "openrouter",
+  "elevenlabs",
+  "groq",
+  "deepgram",
+  "zai",
+  "minimax",
+  "gemini",
+  "grok",
+  "deepseek",
+  "moonshot",
+  "mistral",
+  "perplexity",
+];
 export type DisplayStyle = "numbers" | "bars";
+export type Language = "system" | "en";
+export type TerminalApp = "terminal" | "iterm" | "warp" | "ghostty";
 
 export interface WindowUsage {
   utilization: number;
@@ -29,6 +61,8 @@ export interface DetailExtras {
   credit_balance_cents?: number;
   code_review_utilization?: number;
   on_demand_resets?: number;
+  extra_usage_used_cents?: number;
+  extra_usage_cap_cents?: number;
 }
 
 export interface UsageSnapshot {
@@ -54,12 +88,42 @@ export interface Settings {
   thresholds: Thresholds;
   windows_float_panel: boolean;
   launch_at_login: boolean;
+  language: Language;
+  default_terminal: TerminalApp;
+  show_cost_summary: boolean;
+  cost_history_days: number;
+  check_provider_status: boolean;
+  session_quota_notifications: boolean;
+  quota_warning_notifications: boolean;
+}
+
+export type Severity = "none" | "minor" | "major" | "critical";
+
+export interface Incident {
+  provider: ProviderId;
+  severity: Severity;
+  description: string;
 }
 
 export interface UsageReport {
   snapshots: Partial<Record<ProviderId, UsageSnapshot>>;
   active?: ProviderId;
   settings: Settings;
+  incidents: Incident[];
+}
+
+export interface ProviderCost {
+  today_usd: number;
+  today_tokens: number;
+  window_usd: number;
+  window_tokens: number;
+}
+
+export interface CostSummary {
+  providers: Partial<Record<ProviderId, ProviderCost>>;
+  total_today_usd: number;
+  total_window_usd: number;
+  window_days: number;
 }
 
 export const getSettings = () => invoke<Settings>("get_settings");
@@ -67,11 +131,100 @@ export const setSettings = (settings: Settings) =>
   invoke<void>("set_settings", { settings });
 export const getUsage = () => invoke<UsageReport>("get_usage");
 export const refreshNow = () => invoke<UsageReport>("refresh_now");
+export const openTerminal = () => invoke<void>("open_terminal");
+/// Local cost summary scanned from session logs. Returns null when the user
+/// has the cost summary disabled.
+export const getCostSummary = () =>
+  invoke<CostSummary | null>("get_cost_summary");
+
+/// Store or clear (empty string clears) an API key for a credit provider.
+export const setApiKey = (provider: ProviderId, key: string) =>
+  invoke<void>("set_api_key", { provider, key });
+
+/// Which API-key providers currently have a key stored (never returns secrets).
+export const apiKeyStatus = () =>
+  invoke<Partial<Record<ProviderId, boolean>>>("api_key_status");
+
+/// Compact token count: 58_533_609 → "58.5M", 731_618 → "732K".
+export function formatTokens(n: number): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
+  return String(n);
+}
+
+/// Format a USD figure: "$0.00", "$12.34", "$7,293".
+export function formatUsd(n: number): string {
+  if (n >= 1000) return `$${Math.round(n).toLocaleString("en-US")}`;
+  return `$${n.toFixed(2)}`;
+}
 
 export const PROVIDER_LABEL: Record<ProviderId, string> = {
   claude: "Claude Code",
   codex: "Codex",
+  openrouter: "OpenRouter",
+  elevenlabs: "ElevenLabs",
+  groq: "Groq",
+  deepgram: "Deepgram",
+  zai: "z.ai",
+  minimax: "MiniMax",
+  gemini: "Gemini",
+  grok: "Grok",
+  deepseek: "DeepSeek",
+  moonshot: "Moonshot",
+  mistral: "Mistral",
+  perplexity: "Perplexity",
 };
+
+/// Short label used on the compact tab chips.
+export const PROVIDER_TAB_LABEL: Record<ProviderId, string> = {
+  claude: "Claude",
+  codex: "Codex",
+  openrouter: "OpenRouter",
+  elevenlabs: "11Labs",
+  groq: "Groq",
+  deepgram: "Deepgram",
+  zai: "z.ai",
+  minimax: "MiniMax",
+  gemini: "Gemini",
+  grok: "Grok",
+  deepseek: "DeepSeek",
+  moonshot: "Moonshot",
+  mistral: "Mistral",
+  perplexity: "Perplexity",
+};
+
+/// Per-provider brand accent. Drives the tab underline and the hero card's
+/// fill, so the panel reads at a glance which provider you're looking at.
+export const PROVIDER_ACCENT: Record<ProviderId, string> = {
+  claude: "#d97757",
+  codex: "#10a37f",
+  openrouter: "#6566f1",
+  elevenlabs: "#000000",
+  groq: "#f55036",
+  deepgram: "#13ef93",
+  zai: "#3b82f6",
+  minimax: "#ff4f4f",
+  gemini: "#4285f4",
+  grok: "#1a1a1a",
+  deepseek: "#4d6bfe",
+  moonshot: "#16191e",
+  mistral: "#fa520f",
+  perplexity: "#20808d",
+};
+
+/// Color for a service-status severity badge.
+export function severityColor(s: Severity): string {
+  switch (s) {
+    case "critical":
+    case "major":
+      return "var(--danger)";
+    case "minor":
+      return "var(--warn)";
+    default:
+      return "var(--ok)";
+  }
+}
 
 /// Pick a threshold color for a utilization percentage.
 export function thresholdColor(util: number, t: Thresholds): string {
@@ -100,4 +253,18 @@ export function formatReset(iso?: string): string | null {
   }
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
+}
+
+/// Format a past timestamp as a relative "7m ago" / "2h ago" / "3d ago".
+/// Returns null for missing/invalid input so callers can omit the line.
+export function formatRelative(iso?: string): string | null {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(ms)) return null;
+  if (ms < 60000) return "just now";
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const h = Math.floor(mins / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }

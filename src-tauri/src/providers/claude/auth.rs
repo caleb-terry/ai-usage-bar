@@ -163,14 +163,21 @@ fn parse(json: &str, source: CredentialSource) -> ProviderResult<ClaudeCredentia
 }
 
 /// Load credentials from the keychain, falling back to the JSON file.
+///
+/// Set `AIUSAGEBAR_NO_KEYCHAIN=1` to skip the Keychain entirely and use only
+/// the file. This mirrors CodexBar's "Disable Keychain access" advanced toggle
+/// and is essential for the unsigned CLI binary, where a Keychain read would
+/// otherwise block on the macOS SecurityAgent permission prompt indefinitely.
 pub fn load_credentials() -> ProviderResult<ClaudeCredentials> {
-    let service = keychain_service();
-    // Keychain entries are stored under the user's account name. We try the
-    // generic "user"/empty account first; `keyring` resolves the active user.
-    if let Ok(entry) = keyring::Entry::new(&service, &whoami_account()) {
-        if let Ok(secret) = entry.get_password() {
-            if let Ok(creds) = parse(&secret, CredentialSource::Keychain(service.clone())) {
-                return Ok(creds);
+    if !keychain_disabled() {
+        let service = keychain_service();
+        // Keychain entries are stored under the user's account name. We try the
+        // generic "user"/empty account first; `keyring` resolves the active user.
+        if let Ok(entry) = keyring::Entry::new(&service, &whoami_account()) {
+            if let Ok(secret) = entry.get_password() {
+                if let Ok(creds) = parse(&secret, CredentialSource::Keychain(service.clone())) {
+                    return Ok(creds);
+                }
             }
         }
     }
@@ -178,6 +185,13 @@ pub fn load_credentials() -> ProviderResult<ClaudeCredentials> {
     let path = config_dir().join(".credentials.json");
     let json = std::fs::read_to_string(&path).map_err(|_| ProviderError::Unauthenticated)?;
     parse(&json, CredentialSource::File(path))
+}
+
+/// Whether Keychain access is disabled via the `AIUSAGEBAR_NO_KEYCHAIN` env var.
+fn keychain_disabled() -> bool {
+    std::env::var("AIUSAGEBAR_NO_KEYCHAIN")
+        .map(|v| v != "0" && !v.is_empty())
+        .unwrap_or(false)
 }
 
 fn whoami_account() -> String {

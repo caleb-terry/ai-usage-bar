@@ -1,7 +1,7 @@
 //! Normalize Claude's raw usage response into a unified [`UsageSnapshot`].
 
 use super::client::RawUsage;
-use crate::usage::types::{DisplayMode, ProviderId, UsageSnapshot, WindowUsage};
+use crate::usage::types::{DetailExtras, DisplayMode, ProviderId, UsageSnapshot, WindowUsage};
 use chrono::{DateTime, Utc};
 
 fn parse_iso(s: &Option<String>) -> Option<DateTime<Utc>> {
@@ -51,13 +51,27 @@ pub fn normalize(raw: &RawUsage, subscription_type: &str) -> UsageSnapshot {
         }
     };
 
+    // Surface extra-usage spend even in Session mode. The spend-cap *mode* only
+    // kicks in when there are no session windows, but Max/Pro accounts can still
+    // have extra-usage spend worth showing as a footer metric next to the bars.
+    let extras = raw
+        .extra_usage
+        .as_ref()
+        .filter(|_| matches!(mode, DisplayMode::Session { .. }))
+        .map(|extra| DetailExtras {
+            extra_usage_used_cents: extra.used_credits.map(|v| v.round() as u64),
+            extra_usage_cap_cents: extra.monthly_limit.map(|v| v.round() as u64),
+            ..Default::default()
+        })
+        .unwrap_or_default();
+
     UsageSnapshot {
         provider: ProviderId::Claude,
         plan_label,
         mode,
         fetched_at: now,
         stale: false,
-        extras: Default::default(),
+        extras,
     }
 }
 
@@ -118,6 +132,27 @@ mod tests {
             }
             other => panic!("expected spend cap, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn session_mode_surfaces_extra_usage_spend() {
+        let raw = RawUsage {
+            five_hour: Some(RawWindow {
+                utilization: 31.0,
+                resets_at: None,
+            }),
+            seven_day: None,
+            extra_usage: Some(RawExtraUsage {
+                utilization: None,
+                used_credits: Some(58.0),
+                monthly_limit: Some(5000.0),
+                resets_at: None,
+            }),
+        };
+        let snap = normalize(&raw, "max");
+        assert!(matches!(snap.mode, DisplayMode::Session { .. }));
+        assert_eq!(snap.extras.extra_usage_used_cents, Some(58));
+        assert_eq!(snap.extras.extra_usage_cap_cents, Some(5000));
     }
 
     #[test]

@@ -5,21 +5,25 @@
 //! provider (user-selected or auto-picked by highest utilization).
 
 mod commands;
+pub mod cost;
+mod notify;
 pub mod providers;
-mod settings;
+pub mod settings;
 mod state;
+pub mod status;
 mod tray;
 pub mod usage;
 mod windows;
 
 use crate::providers::claude::ClaudeProvider;
 use crate::providers::codex::CodexProvider;
+use crate::providers::credits::CreditsProvider;
 use crate::providers::Provider;
 use crate::settings::{ActiveProvider, DisplayStyle, Settings};
 use crate::state::AppState;
 use crate::tray::menu::ids;
 use crate::usage::selector;
-use crate::usage::types::{DisplayMode, UsageSnapshot};
+use crate::usage::types::{DisplayMode, ProviderId, ProviderKind, UsageSnapshot};
 use std::sync::Arc;
 use tauri::image::Image;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -28,6 +32,11 @@ use tauri_plugin_autostart::ManagerExt;
 
 const TRAY_ID: &str = "main-tray";
 
+/// Set when the user picks "Quit" so the `ExitRequested` guard below lets the
+/// process actually exit. Without this, the guard that keeps the app alive when
+/// a window closes would also veto a deliberate quit. See `on_menu_event`.
+static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let http = reqwest::Client::builder()
@@ -35,11 +44,19 @@ pub fn run() {
         .build()
         .expect("build http client");
 
-    // Build providers.
-    let provider_list: Vec<Arc<dyn Provider>> = vec![
+    // Build providers: the two OAuth subscription providers plus a generic
+    // API-key credits provider for every remaining `ProviderId`. Driving the
+    // API-key set off `ProviderId::ALL` keeps adding a provider to a single
+    // enum edit rather than a list mutation here.
+    let mut provider_list: Vec<Arc<dyn Provider>> = vec![
         Arc::new(ClaudeProvider::new(http.clone())),
         Arc::new(CodexProvider::new(http.clone())),
     ];
+    for id in ProviderId::ALL {
+        if id.kind() == ProviderKind::ApiKeyCredits {
+            provider_list.push(Arc::new(CreditsProvider::new(http.clone(), id)));
+        }
+    }
 
     // Load settings. On first run all providers are enabled by default; the
     // background poll loop classifies each as connected / sign-in-needed once
@@ -56,6 +73,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -75,6 +93,10 @@ pub fn run() {
             commands::set_settings,
             commands::get_usage,
             commands::refresh_now,
+            commands::open_terminal,
+            commands::get_cost_summary,
+            commands::set_api_key,
+            commands::api_key_status,
         ])
         .setup(|app| {
             // Build the initial menu/tray from settings loaded directly off
@@ -88,7 +110,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            let menu = tray::menu::build_menu(app.handle(), &initial_settings, "Loading…")?;
+            let menu = tray::menu::build_menu(app.handle(), &initial_settings, "Loading…", None)?;
 
             let _tray = TrayIconBuilder::with_id(TRAY_ID)
                 .icon(app.default_window_icon().unwrap().clone())
@@ -98,6 +120,24 @@ pub fn run() {
                 .on_menu_event(on_menu_event)
                 .on_tray_icon_event(on_tray_icon_event)
                 .build(app)?;
+
+            // Give the floating panel a genuine macOS vibrancy backing
+            // (NSVisualEffectView) rounded to match the CSS card, so it reads as
+            // a Tahoe "liquid glass" surface instead of a flat opaque rectangle.
+            // The rounded effect view is what removes the corner "slop": the
+            // glass layer itself clips to the radius, so nothing pokes past it.
+            #[cfg(target_os = "macos")]
+            if let Some(panel) = app.get_webview_window("panel") {
+                use window_vibrancy::{
+                    apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState,
+                };
+                let _ = apply_vibrancy(
+                    &panel,
+                    NSVisualEffectMaterial::Popover,
+                    Some(NSVisualEffectState::Active),
+                    Some(14.0),
+                );
+            }
 
             // Keep the settings/panel windows hidden until invoked, and hide
             // (rather than close) them so the app keeps running.
@@ -124,11 +164,49 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error building app")
         .run(|_app, event| {
-            // Prevent the app from exiting when the last window hides.
+            // Keep the app alive when a window (e.g. Settings) closes — but let
+            // a deliberate Quit through, signalled by the QUITTING flag.
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
-                api.prevent_exit();
+                if !QUITTING.load(std::sync::atomic::Ordering::SeqCst) {
+                    api.prevent_exit();
+                }
             }
         });
+}
+
+/// Spawn the user's preferred terminal application. Best-effort; failures are
+/// logged but otherwise ignored (there is no UI surface to report them to from
+/// the tray menu). Shared by the tray menu handler and the `open_terminal`
+/// IPC command.
+pub(crate) fn launch_terminal(terminal: crate::settings::TerminalApp) {
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open")
+        .args(["-a", terminal.macos_app()])
+        .spawn();
+
+    #[cfg(target_os = "windows")]
+    let result = {
+        let _ = terminal; // app choice is macOS-only for now
+                          // Spawn the executables directly rather than via `cmd /C start`. `start`
+                          // returns success as soon as the shell launches — even when `wt.exe` is
+                          // absent — so an `.or_else` chained on it would never reach the fallback.
+                          // Spawning the binary itself yields a real io::Result we can branch on.
+        std::process::Command::new("wt.exe").spawn().or_else(|_| {
+            std::process::Command::new("cmd.exe")
+                .args(["/C", "start", "", "cmd.exe"])
+                .spawn()
+        })
+    };
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let result = {
+        let _ = terminal;
+        std::process::Command::new("x-terminal-emulator").spawn()
+    };
+
+    if let Err(e) = result {
+        log::warn!("failed to open terminal: {e}");
+    }
 }
 
 fn is_first_run() -> bool {
@@ -149,6 +227,35 @@ async fn poll_loop<R: Runtime>(app: AppHandle<R>) {
             let changed = agg.poll_enabled(&settings).await;
             (settings, changed)
         };
+
+        // Edge-triggered quota notifications from the freshly cached snapshots.
+        {
+            let state = app.state::<AppState>();
+            let snapshots = state.aggregator.lock().await.all_cached().clone();
+            let pending = state.notify.lock().await.evaluate(&settings, &snapshots);
+            for n in pending {
+                use tauri_plugin_notification::NotificationExt;
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title(n.title)
+                    .body(n.body)
+                    .show();
+            }
+        }
+
+        // Provider service-status polling (best-effort; never blocks usage).
+        // When disabled we clear any stale incidents so the badge disappears.
+        {
+            let state = app.state::<AppState>();
+            let incidents = if settings.check_provider_status {
+                let http = state.http.clone();
+                status::fetch_many(&http, &settings.enabled_providers).await
+            } else {
+                Vec::new()
+            };
+            *state.incidents.lock().await = incidents;
+        }
 
         // Always refresh on the first pass; afterwards only when the active
         // provider changed.
@@ -179,38 +286,59 @@ async fn update_tray<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
 
     let Some(snapshot) = snapshot else { return };
     let appearance = tray::theme::detect();
-    let rendered = tray::render_icon(&snapshot, settings, appearance);
 
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };
 
-    let image = Image::new_owned(rendered.rgba, rendered.width, rendered.height);
-    let _ = tray.set_icon(Some(image));
+    // macOS: provider glyph (template) + the 5h percentage as the menu-bar title.
+    // Other platforms have no separate title, so keep the self-contained bitmap
+    // that bakes the numbers/bars into the icon.
     #[cfg(target_os = "macos")]
     {
+        let rendered = tray::render_provider_glyph(snapshot.provider, appearance);
+        let image = Image::new_owned(rendered.rgba, rendered.width, rendered.height);
+        let _ = tray.set_icon(Some(image));
         let _ = tray.set_icon_as_template(rendered.is_template);
-        // On macOS show the compact title alongside the icon in numbers mode.
-        let _ = tray.set_title(Some(menu_title(&snapshot, settings)));
+        let _ = tray.set_title(Some(tray_title(&snapshot, settings)));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let rendered = tray::render_icon(&snapshot, settings, appearance);
+        let image = Image::new_owned(rendered.rgba, rendered.width, rendered.height);
+        let _ = tray.set_icon(Some(image));
     }
 
     let _ = tray.set_tooltip(Some(tooltip(&snapshot, settings)));
 
+    // Format the worst active service incident, if any, as a second header row.
+    let incident_line = {
+        let incidents = state.incidents.lock().await;
+        status::worst(&incidents).map(|i| format!("⚠ {}: {}", i.provider.label(), i.description))
+    };
+
     // Rebuild the menu so checkmarks + status header stay current.
-    if let Ok(menu) = tray::menu::build_menu(app, settings, &status_line(&snapshot, settings)) {
+    if let Ok(menu) = tray::menu::build_menu(
+        app,
+        settings,
+        &status_line(&snapshot, settings),
+        incident_line.as_deref(),
+    ) {
         let _ = tray.set_menu(Some(menu));
     }
 }
 
-/// Short title shown next to the macOS menu bar icon, e.g. "42·18".
-fn menu_title(snapshot: &UsageSnapshot, settings: &Settings) -> String {
+/// Short title shown next to the macOS menu bar glyph: only the 5-hour session
+/// percentage, e.g. "45%". Respects the user's used/remaining preference via
+/// `display_pct`. Weekly is intentionally omitted here — it lives in the panel.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn tray_title(snapshot: &UsageSnapshot, settings: &Settings) -> String {
     match &snapshot.mode {
-        DisplayMode::Session { primary, secondary } => {
-            let p = settings.display_pct(primary.utilization).round() as i32;
-            match secondary {
-                Some(s) => format!("{p}·{}", settings.display_pct(s.utilization).round() as i32),
-                None => format!("{p}"),
-            }
+        DisplayMode::Session { primary, .. } => {
+            format!(
+                "{}%",
+                settings.display_pct(primary.utilization).round() as i32
+            )
         }
         DisplayMode::SpendCap { utilization, .. } => {
             format!("{}%", settings.display_pct(*utilization).round() as i32)
@@ -270,6 +398,9 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) 
     tauri::async_runtime::spawn(async move {
         match id.as_str() {
             ids::QUIT => {
+                // Mark the exit as intentional so the ExitRequested guard
+                // doesn't veto it, then tear the process down.
+                QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
                 app.exit(0);
             }
             ids::REFRESH => {
@@ -281,6 +412,15 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) 
                 }
                 update_tray(&app, &settings).await;
                 let _ = app.emit("usage-updated", ());
+            }
+            ids::OPEN_TERMINAL => {
+                let terminal = app
+                    .state::<AppState>()
+                    .settings
+                    .lock()
+                    .await
+                    .default_terminal;
+                launch_terminal(terminal);
             }
             ids::SETTINGS => {
                 if let Some(win) = app.get_webview_window("settings") {

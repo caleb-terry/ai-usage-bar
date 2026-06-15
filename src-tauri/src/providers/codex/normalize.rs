@@ -23,6 +23,7 @@ pub fn normalize(raw: &RawUsage) -> UsageSnapshot {
             .rate_limit_reset_credits
             .as_ref()
             .and_then(|r| r.available_count),
+        ..Default::default()
     };
 
     // Prefer session rate windows. If absent but a workspace spend cap exists,
