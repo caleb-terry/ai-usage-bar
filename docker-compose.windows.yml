@@ -1,0 +1,56 @@
+# Windows 11 test VM for installing & smoke-testing the AI Usage Bar Windows
+# build (.msi / .exe) without a physical Windows machine.
+#
+# This uses dockurr/windows, which runs a *real* Windows 11 VM via KVM/QEMU
+# inside the container — not Windows Server Core. A genuine GUI desktop is
+# required because the Tauri installer produces a WebView2-backed GUI app and
+# lives in the system tray; there is nothing to verify in a headless/Core image.
+#
+# Quick start:
+#   docker compose -f docker-compose.windows.yml up -d
+#   # First boot downloads + auto-installs Windows 11 (~10-20 min, unattended).
+#   # Watch progress in the browser:  http://localhost:8006
+#   # Once installed, RDP in:         localhost:3389  (user: docker, no password)
+#
+# Drop your built installer into ./win-share on the host; it shows up inside
+# the VM at  \\host.lan\Data  (a network drive), so you can run it directly.
+#
+# Tear down (KEEPS the installed VM on the named volume):
+#   docker compose -f docker-compose.windows.yml down
+# Wipe everything including the installed Windows disk:
+#   docker compose -f docker-compose.windows.yml down -v
+
+services:
+  windows:
+    image: dockurr/windows
+    container_name: aub-windows-test
+    # KVM is what makes this usable (hardware-accelerated). Without it the VM
+    # falls back to slow TCG emulation. /dev/kvm requires a Linux host with
+    # virtualization enabled — it is NOT available on Docker Desktop for macOS
+    # or Windows (see README.windows-test.md for the macOS path).
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN          # required for the VM's internal NAT networking
+    stop_grace_period: 2m  # give Windows time to shut down cleanly
+    environment:
+      VERSION: "11"        # Windows 11 (auto-downloaded, unattended install)
+      RAM_SIZE: "6G"       # bump if you also run the app + browser inside
+      CPU_CORES: "4"
+      DISK_SIZE: "64G"
+      # Pre-create a local admin account so RDP works without manual setup.
+      USERNAME: "docker"
+      PASSWORD: ""         # blank password = passwordless RDP login
+      # LANGUAGE: "English"
+      # REGION: "en-US"
+    ports:
+      - "8006:8006"        # noVNC web viewer (installer progress + desktop)
+      - "3389:3389/tcp"    # RDP
+      - "3389:3389/udp"
+    volumes:
+      - aub-windows-storage:/storage   # the installed Windows disk (persists)
+      - ./win-share:/data              # host folder -> \\host.lan\Data in the VM
+
+volumes:
+  aub-windows-storage:

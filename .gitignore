@@ -22,6 +22,10 @@ src-tauri/gen
 *.sln
 *.sw?
 
+# Windows test VM — share folder holds built installers, not source
+win-share/*
+!win-share/README.txt
+
 # Logs
 *.log
 npm-debug.log*
