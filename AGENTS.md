@@ -42,6 +42,7 @@ cargo run --example live_fetch [Codex|codex]   # live fetch w/ your real creds, 
 - **i18n** (`src/i18n/`) ships English only; `strings(language)` resolves the active locale, falling back to `navigator.language` when set to `System`. Add a locale = add a `Strings` record + a case; the structure is the extension point.
 - **GitHub Actions release setup:** because `package.json` already pins `packageManager`, `pnpm/action-setup` must not also pass `version:`. Doing both fails the workflow with "Multiple versions of pnpm specified." Tauri release asset naming uses `assetNamePattern` (not `releaseAssetNamePattern`).
 - **Multiple Rust binaries:** `src-tauri/Cargo.toml` needs `default-run = "ai-usage-bar"` because the package also ships the `aiusagebar` CLI. Without it, `pnpm tauri build` fails with "failed to find main binary."
+- **macOS release architecture:** avoid `--target universal-apple-darwin` while the package has the auxiliary `aiusagebar` CLI binary. Tauri universal bundling builds/lipos the app binary but then fails copying the CLI from `target/universal-apple-darwin`; the release workflow currently builds a native-architecture `.dmg` instead.
 
 ## Code style
 

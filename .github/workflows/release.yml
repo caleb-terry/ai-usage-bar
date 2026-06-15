@@ -20,10 +20,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS — universal binary (Apple Silicon + Intel)
+          # macOS — native runner architecture. Universal bundling currently
+          # only lipo's the main Tauri app binary, then fails when copying the
+          # auxiliary `aiusagebar` CLI binary into the app bundle.
           - platform: macos-latest
-            target: universal-apple-darwin
-            args: "--target universal-apple-darwin"
+            target: aarch64-apple-darwin
+            args: ""
           # Windows — x64
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
