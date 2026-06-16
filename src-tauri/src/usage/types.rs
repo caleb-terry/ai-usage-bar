@@ -74,20 +74,146 @@ pub struct ProviderMeta {
 ///
 /// Columns: id, str, label, tab_label, accent, kind, env_var, status_url.
 pub const PROVIDER_META: &[ProviderMeta] = &[
-    meta(ProviderId::Claude, "claude", "Claude Code", "Claude", "#d97757", ProviderKind::Subscription, None, Some("https://status.claude.com/api/v2/status.json")),
-    meta(ProviderId::Codex, "codex", "Codex", "Codex", "#10a37f", ProviderKind::Subscription, None, Some("https://status.openai.com/api/v2/status.json")),
-    meta(ProviderId::OpenRouter, "openrouter", "OpenRouter", "OpenRouter", "#6566f1", ProviderKind::ApiKeyCredits, Some("OPENROUTER_API_KEY"), None),
-    meta(ProviderId::ElevenLabs, "elevenlabs", "ElevenLabs", "11Labs", "#000000", ProviderKind::ApiKeyCredits, Some("ELEVENLABS_API_KEY"), None),
-    meta(ProviderId::Groq, "groq", "Groq", "Groq", "#f55036", ProviderKind::ApiKeyCredits, Some("GROQ_API_KEY"), Some("https://groqstatus.com/api/v2/status.json")),
-    meta(ProviderId::Deepgram, "deepgram", "Deepgram", "Deepgram", "#13ef93", ProviderKind::ApiKeyCredits, Some("DEEPGRAM_API_KEY"), None),
-    meta(ProviderId::Zai, "zai", "z.ai", "z.ai", "#3b82f6", ProviderKind::ApiKeyCredits, Some("ZAI_API_KEY"), None),
-    meta(ProviderId::MiniMax, "minimax", "MiniMax", "MiniMax", "#ff4f4f", ProviderKind::ApiKeyCredits, Some("MINIMAX_API_KEY"), None),
-    meta(ProviderId::Gemini, "gemini", "Gemini", "Gemini", "#4285f4", ProviderKind::ApiKeyCredits, Some("GEMINI_API_KEY"), None),
-    meta(ProviderId::Grok, "grok", "Grok", "Grok", "#1a1a1a", ProviderKind::ApiKeyCredits, Some("XAI_API_KEY"), None),
-    meta(ProviderId::DeepSeek, "deepseek", "DeepSeek", "DeepSeek", "#4d6bfe", ProviderKind::ApiKeyCredits, Some("DEEPSEEK_API_KEY"), None),
-    meta(ProviderId::Moonshot, "moonshot", "Moonshot", "Moonshot", "#16191e", ProviderKind::ApiKeyCredits, Some("MOONSHOT_API_KEY"), None),
-    meta(ProviderId::Mistral, "mistral", "Mistral", "Mistral", "#fa520f", ProviderKind::ApiKeyCredits, Some("MISTRAL_API_KEY"), None),
-    meta(ProviderId::Perplexity, "perplexity", "Perplexity", "Perplexity", "#20808d", ProviderKind::ApiKeyCredits, Some("PERPLEXITY_API_KEY"), None),
+    meta(
+        ProviderId::Claude,
+        "claude",
+        "Claude Code",
+        "Claude",
+        "#d97757",
+        ProviderKind::Subscription,
+        None,
+        Some("https://status.claude.com/api/v2/status.json"),
+    ),
+    meta(
+        ProviderId::Codex,
+        "codex",
+        "Codex",
+        "Codex",
+        "#10a37f",
+        ProviderKind::Subscription,
+        None,
+        Some("https://status.openai.com/api/v2/status.json"),
+    ),
+    meta(
+        ProviderId::OpenRouter,
+        "openrouter",
+        "OpenRouter",
+        "OpenRouter",
+        "#6566f1",
+        ProviderKind::ApiKeyCredits,
+        Some("OPENROUTER_API_KEY"),
+        None,
+    ),
+    meta(
+        ProviderId::ElevenLabs,
+        "elevenlabs",
+        "ElevenLabs",
+        "11Labs",
+        "#000000",
+        ProviderKind::ApiKeyCredits,
+        Some("ELEVENLABS_API_KEY"),
+        None,
+    ),
+    meta(
+        ProviderId::Groq,
+        "groq",
+        "Groq",
+        "Groq",
+        "#f55036",
+        ProviderKind::ApiKeyCredits,
+        Some("GROQ_API_KEY"),
+        Some("https://groqstatus.com/api/v2/status.json"),
+    ),
+    meta(
+        ProviderId::Deepgram,
+        "deepgram",
+        "Deepgram",
+        "Deepgram",
+        "#13ef93",
+        ProviderKind::ApiKeyCredits,
+        Some("DEEPGRAM_API_KEY"),
+        None,
+    ),
+    meta(
+        ProviderId::Zai,
+        "zai",
+        "z.ai",
+        "z.ai",
+        "#3b82f6",
+        ProviderKind::ApiKeyCredits,
+        Some("ZAI_API_KEY"),
+        None,
+    ),
+    meta(
+        ProviderId::MiniMax,
+        "minimax",
+        "MiniMax",
+        "MiniMax",
+        "#ff4f4f",
+        ProviderKind::ApiKeyCredits,
+        Some("MINIMAX_API_KEY"),
+        None,
+    ),
+    meta(
+        ProviderId::Gemini,
+        "gemini",
+        "Gemini",
+        "Gemini",
+        "#4285f4",
+        ProviderKind::ApiKeyCredits,
+        Some("GEMINI_API_KEY"),
+        None,
+    ),
+    meta(
+        ProviderId::Grok,
+        "grok",
+        "Grok",
+        "Grok",
+        "#1a1a1a",
+        ProviderKind::ApiKeyCredits,
+        Some("XAI_API_KEY"),
+        None,
+    ),
+    meta(
+        ProviderId::DeepSeek,
+        "deepseek",
+        "DeepSeek",
+        "DeepSeek",
+        "#4d6bfe",
+        ProviderKind::ApiKeyCredits,
+        Some("DEEPSEEK_API_KEY"),
+        None,
+    ),
+    meta(
+        ProviderId::Moonshot,
+        "moonshot",
+        "Moonshot",
+        "Moonshot",
+        "#16191e",
+        ProviderKind::ApiKeyCredits,
+        Some("MOONSHOT_API_KEY"),
+        None,
+    ),
+    meta(
+        ProviderId::Mistral,
+        "mistral",
+        "Mistral",
+        "Mistral",
+        "#fa520f",
+        ProviderKind::ApiKeyCredits,
+        Some("MISTRAL_API_KEY"),
+        None,
+    ),
+    meta(
+        ProviderId::Perplexity,
+        "perplexity",
+        "Perplexity",
+        "Perplexity",
+        "#20808d",
+        ProviderKind::ApiKeyCredits,
+        Some("PERPLEXITY_API_KEY"),
+        None,
+    ),
 ];
 
 /// `const fn` row constructor so `PROVIDER_META` stays a compile-time constant
@@ -267,10 +393,16 @@ impl DisplayMode {
     pub fn tray_title(&self, show_remaining: bool) -> String {
         match self {
             DisplayMode::Session { primary, .. } => {
-                format!("{}%", display_pct(primary.utilization, show_remaining).round() as i32)
+                format!(
+                    "{}%",
+                    display_pct(primary.utilization, show_remaining).round() as i32
+                )
             }
             DisplayMode::SpendCap { utilization, .. } => {
-                format!("{}%", display_pct(*utilization, show_remaining).round() as i32)
+                format!(
+                    "{}%",
+                    display_pct(*utilization, show_remaining).round() as i32
+                )
             }
             DisplayMode::CreditBalance { balance_cents } => format_usd_cents(*balance_cents),
             DisplayMode::Unauthenticated => "—".to_string(),
@@ -295,7 +427,10 @@ impl DisplayMode {
                 }
             }
             DisplayMode::SpendCap { utilization, .. } => {
-                format!("Spend cap {}% {label}", display_pct(*utilization, show_remaining).round() as i32)
+                format!(
+                    "Spend cap {}% {label}",
+                    display_pct(*utilization, show_remaining).round() as i32
+                )
             }
             DisplayMode::CreditBalance { balance_cents } => {
                 format!("{} credits", format_usd_cents(*balance_cents))
@@ -429,9 +564,13 @@ mod tests {
         assert_eq!(session.tray_title(false), "45%");
         assert_eq!(session.tray_title(true), "55%"); // remaining
 
-        let bal = DisplayMode::CreditBalance { balance_cents: 1850 };
+        let bal = DisplayMode::CreditBalance {
+            balance_cents: 1850,
+        };
         assert_eq!(bal.tray_title(false), "$18.50");
-        let big = DisplayMode::CreditBalance { balance_cents: 729_300 };
+        let big = DisplayMode::CreditBalance {
+            balance_cents: 729_300,
+        };
         assert_eq!(big.tray_title(false), "$7,293");
 
         assert_eq!(DisplayMode::Unauthenticated.tray_title(false), "—");
@@ -447,7 +586,9 @@ mod tests {
         assert_eq!(session.status_summary(false), "5h 42% used · Wk 18% used");
         assert_eq!(session.status_summary(true), "5h 58% left · Wk 82% left");
 
-        let bal = DisplayMode::CreditBalance { balance_cents: 1850 };
+        let bal = DisplayMode::CreditBalance {
+            balance_cents: 1850,
+        };
         assert_eq!(bal.status_summary(false), "$18.50 credits");
         assert_eq!(
             DisplayMode::Unauthenticated.status_summary(false),
@@ -468,7 +609,12 @@ mod tests {
         // Every ProviderId resolves to its own row (not the fallback). This
         // makes ProviderId::meta() infallible by construction.
         for id in ProviderId::ALL {
-            assert_eq!(id.meta().id, id, "{} resolved to the wrong row", id.as_str());
+            assert_eq!(
+                id.meta().id,
+                id,
+                "{} resolved to the wrong row",
+                id.as_str()
+            );
         }
         assert_eq!(PROVIDER_META.len(), ProviderId::ALL.len());
     }

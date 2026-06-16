@@ -146,7 +146,12 @@ fn cmd_usage(args: &[String]) -> Result<ExitCode, String> {
         // multi-provider `usage` call is bounded by the slowest provider.
         let handles: Vec<_> = providers
             .iter()
-            .map(|&id| (id, tokio::spawn(async move { providers::fetch_once(id).await })))
+            .map(|&id| {
+                (
+                    id,
+                    tokio::spawn(async move { providers::fetch_once(id).await }),
+                )
+            })
             .collect();
         let mut entries = Vec::new();
         for (id, handle) in handles {

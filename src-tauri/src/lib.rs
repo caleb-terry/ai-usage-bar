@@ -319,10 +319,28 @@ async fn update_tray<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
         active.and_then(|id| agg.cached(id).cloned())
     };
 
-    let Some(snapshot) = snapshot else { return };
     let appearance = tray::theme::detect();
 
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return;
+    };
+
+    // No active snapshot resolves when every provider is disabled (or none has
+    // fetched yet). Don't bail out here — that would leave the *previous*
+    // provider's icon/title/menu frozen on screen even though the UI says no
+    // providers are enabled. Instead reset the tray to a neutral placeholder so
+    // it visibly reflects the empty state.
+    let Some(snapshot) = snapshot else {
+        let _ = tray.set_icon(app.default_window_icon().cloned());
+        #[cfg(target_os = "macos")]
+        {
+            let _ = tray.set_icon_as_template(true);
+            let _ = tray.set_title(None::<String>);
+        }
+        let _ = tray.set_tooltip(Some(NO_PROVIDERS_STATUS.to_string()));
+        if let Ok(menu) = tray::menu::build_menu(app, settings, NO_PROVIDERS_STATUS, None) {
+            let _ = tray.set_menu(Some(menu));
+        }
         return;
     };
 
@@ -362,6 +380,10 @@ async fn update_tray<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
         let _ = tray.set_menu(Some(menu));
     }
 }
+
+/// Header/tooltip shown when no provider is enabled, so the tray doesn't keep
+/// displaying a stale provider after the user disables everything.
+const NO_PROVIDERS_STATUS: &str = "No providers enabled";
 
 /// Full one-line status (provider · plan · body), used in the tooltip and menu
 /// header. The mode-specific body lives on `DisplayMode::status_summary`; this
@@ -408,12 +430,7 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) 
                     .default_terminal;
                 launch_terminal(terminal);
             }
-            ids::SETTINGS => {
-                if let Some(win) = app.get_webview_window("settings") {
-                    let _ = win.show();
-                    let _ = win.set_focus();
-                }
-            }
+            ids::SETTINGS => show_settings_window(&app),
             ids::PROVIDER_AUTO => set_active(&app, ActiveProvider::Auto).await,
             ids::PROVIDER_CLAUDE => set_active(&app, ActiveProvider::Claude).await,
             ids::PROVIDER_CODEX => set_active(&app, ActiveProvider::Codex).await,
@@ -484,7 +501,17 @@ pub(crate) async fn apply_settings<R: Runtime>(app: &AppHandle<R>, next: Setting
     let _ = app.emit("usage-updated", ());
 }
 
-/// Handle left-click on the tray icon (toggle the detail panel).
+/// Bring the (normally hidden) settings window to the foreground.
+fn show_settings_window<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(win) = app.get_webview_window("settings") {
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+}
+
+/// Handle left-click on the tray icon. Toggles the floating detail panel,
+/// except on Windows where `windows_float_panel == false` opens Settings
+/// instead (Windows users who prefer the classic tray-app behavior).
 fn on_tray_icon_event<R: Runtime>(tray: &tauri::tray::TrayIcon<R>, event: TrayIconEvent) {
     tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
     if let TrayIconEvent::Click {
@@ -494,6 +521,27 @@ fn on_tray_icon_event<R: Runtime>(tray: &tauri::tray::TrayIcon<R>, event: TrayIc
     } = event
     {
         let app = tray.app_handle().clone();
-        let _ = windows::float_panel::toggle(&app);
+        // The setting only exists on Windows; elsewhere left-click always
+        // toggles the panel. Spawn the settings lookup off the read so we
+        // don't block the tray callback on the settings lock.
+        #[cfg(target_os = "windows")]
+        {
+            tauri::async_runtime::spawn(async move {
+                let float_panel = {
+                    let state = app.state::<AppState>();
+                    let settings = state.settings.lock().await;
+                    settings.windows_float_panel
+                };
+                if float_panel {
+                    let _ = windows::float_panel::toggle(&app);
+                } else {
+                    show_settings_window(&app);
+                }
+            });
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = windows::float_panel::toggle(&app);
+        }
     }
 }

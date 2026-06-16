@@ -125,7 +125,12 @@ fn endpoint_for(id: ProviderId) -> Option<CreditEndpoint> {
             "api",
         ),
         // Key-validity probes: OpenAI-compatible model lists / no public balance.
-        ProviderId::Groq => endpoint("https://api.groq.com/openai/v1/models", Bearer, Probe, "api"),
+        ProviderId::Groq => endpoint(
+            "https://api.groq.com/openai/v1/models",
+            Bearer,
+            Probe,
+            "api",
+        ),
         ProviderId::Zai => endpoint("https://api.z.ai/api/paas/v4/models", Bearer, Probe, "api"),
         ProviderId::Gemini => endpoint(
             "https://generativelanguage.googleapis.com/v1beta/models",
@@ -135,7 +140,9 @@ fn endpoint_for(id: ProviderId) -> Option<CreditEndpoint> {
         ),
         ProviderId::Grok => endpoint("https://api.x.ai/v1/models", Bearer, Probe, "api"),
         ProviderId::Mistral => endpoint("https://api.mistral.ai/v1/models", Bearer, Probe, "api"),
-        ProviderId::Perplexity => endpoint("https://api.perplexity.ai/models", Bearer, Probe, "api"),
+        ProviderId::Perplexity => {
+            endpoint("https://api.perplexity.ai/models", Bearer, Probe, "api")
+        }
         ProviderId::Claude | ProviderId::Codex => return None,
     })
 }
@@ -164,8 +171,8 @@ impl Provider for CreditsProvider {
 
     async fn fetch(&self) -> ProviderResult<UsageSnapshot> {
         let id = self.id;
-        let endpoint =
-            endpoint_for(id).ok_or_else(|| ProviderError::Other("not an API-key provider".into()))?;
+        let endpoint = endpoint_for(id)
+            .ok_or_else(|| ProviderError::Other("not an API-key provider".into()))?;
 
         let key = tokio::task::spawn_blocking(move || api_key::load_key(id))
             .await
@@ -214,7 +221,11 @@ impl CreditsProvider {
     /// Apply the endpoint's parse strategy to a response body.
     fn normalize(&self, endpoint: &CreditEndpoint, v: Value) -> UsageSnapshot {
         match endpoint.parse {
-            Parse::Probe => self.snapshot(endpoint.plan, DisplayMode::ApiKeyOnly, DetailExtras::default()),
+            Parse::Probe => self.snapshot(
+                endpoint.plan,
+                DisplayMode::ApiKeyOnly,
+                DetailExtras::default(),
+            ),
             Parse::OpenRouterCredits => {
                 let data = v.get("data").unwrap_or(&v);
                 let total = f64_at(data, "total_credits").unwrap_or(0.0);
@@ -247,15 +258,24 @@ impl CreditsProvider {
             }
             Parse::Balance(path) => match dig_f64(&v, path).or_else(|| f64_at(&v, "amount")) {
                 Some(amt) => self.balance_snapshot(endpoint.plan, (amt * 100.0).round() as u64),
-                None => self.snapshot(endpoint.plan, DisplayMode::ApiKeyOnly, DetailExtras::default()),
+                None => self.snapshot(
+                    endpoint.plan,
+                    DisplayMode::ApiKeyOnly,
+                    DetailExtras::default(),
+                ),
             },
             Parse::BalanceSum(path) => {
-                let sum = v.get(path).and_then(|b| b.as_array()).map(|arr| {
-                    arr.iter().filter_map(|x| f64_at(x, "amount")).sum::<f64>()
-                });
+                let sum = v
+                    .get(path)
+                    .and_then(|b| b.as_array())
+                    .map(|arr| arr.iter().filter_map(|x| f64_at(x, "amount")).sum::<f64>());
                 match sum {
                     Some(amt) => self.balance_snapshot(endpoint.plan, (amt * 100.0).round() as u64),
-                    None => self.snapshot(endpoint.plan, DisplayMode::ApiKeyOnly, DetailExtras::default()),
+                    None => self.snapshot(
+                        endpoint.plan,
+                        DisplayMode::ApiKeyOnly,
+                        DetailExtras::default(),
+                    ),
                 }
             }
         }
@@ -402,7 +422,9 @@ mod tests {
         let body = serde_json::json!({ "balance_infos": [{ "total_balance": "42.50" }] });
         assert!(matches!(
             p.normalize(&ep, body).mode,
-            DisplayMode::CreditBalance { balance_cents: 4250 }
+            DisplayMode::CreditBalance {
+                balance_cents: 4250
+            }
         ));
 
         // Moonshot: data.available_balance as a number.
@@ -420,7 +442,9 @@ mod tests {
         let body = serde_json::json!({ "balance": 12.0 });
         assert!(matches!(
             p.normalize(&ep, body).mode,
-            DisplayMode::CreditBalance { balance_cents: 1200 }
+            DisplayMode::CreditBalance {
+                balance_cents: 1200
+            }
         ));
 
         // MiniMax `amount` fallback when the primary path is absent.

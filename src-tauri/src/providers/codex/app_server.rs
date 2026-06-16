@@ -63,6 +63,12 @@ async fn run_rpc() -> ProviderResult<RawUsage> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
+        // `fetch_via_app_server` wraps this whole future in a timeout. If the
+        // timeout fires while we're awaiting stdout below, the future (and this
+        // `child`) is dropped before the explicit `child.kill()` on the normal
+        // path runs — without this, the spawned `codex` process would be
+        // orphaned. `kill_on_drop` makes Tokio reap it on drop too.
+        .kill_on_drop(true)
         .spawn()
         .map_err(|e| ProviderError::Other(format!("spawn codex: {e}")))?;
 

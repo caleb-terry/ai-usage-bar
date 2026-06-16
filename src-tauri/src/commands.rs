@@ -41,7 +41,10 @@ pub async fn set_settings(app: AppHandle, settings: Settings) -> Result<(), Stri
 /// single source of truth is `Settings::default()`, not a hand-maintained copy
 /// in the frontend.
 #[tauri::command]
-pub async fn reset_settings(app: AppHandle, state: State<'_, AppState>) -> Result<Settings, String> {
+pub async fn reset_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Settings, String> {
     let enabled = state.settings.lock().await.enabled_providers.clone();
     let next = Settings {
         enabled_providers: enabled,
@@ -81,7 +84,10 @@ pub async fn open_terminal(state: State<'_, AppState>) -> Result<(), String> {
 /// fires quota notifications, refreshes incidents, redraws the tray, and emits
 /// `usage-updated` — the same side effects the background poll loop produces.
 #[tauri::command]
-pub async fn refresh_now(app: AppHandle, state: State<'_, AppState>) -> Result<UsageReport, String> {
+pub async fn refresh_now(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<UsageReport, String> {
     let settings = state.settings.lock().await.clone();
     crate::cost::invalidate();
     crate::refresh_and_render(&app, &settings).await;
