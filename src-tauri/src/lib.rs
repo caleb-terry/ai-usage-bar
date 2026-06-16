@@ -286,6 +286,14 @@ pub(crate) async fn refresh_and_render<R: Runtime>(app: &AppHandle<R>, settings:
         changed
     };
 
+    // Resolve who's active now so we can both gate the usage redraw and detect
+    // the "nothing to show" case below.
+    let active = {
+        let state = app.state::<AppState>();
+        let agg = state.aggregator.lock().await;
+        selector::resolve_active(settings, agg.all_cached())
+    };
+
     // Redraw the tray only when a change could affect what it displays.
     // In Auto mode any provider's change can flip the selection or update
     // the shown figure, so any non-empty `changed` set qualifies. With an
@@ -293,16 +301,19 @@ pub(crate) async fn refresh_and_render<R: Runtime>(app: &AppHandle<R>, settings:
     // Either way, an incident-set change repaints the header.
     let usage_redraw = match settings.active_provider {
         crate::settings::ActiveProvider::Auto => !changed.is_empty(),
-        _ => {
-            let active = {
-                let state = app.state::<AppState>();
-                let agg = state.aggregator.lock().await;
-                selector::resolve_active(settings, agg.all_cached())
-            };
-            active.map(|a| changed.contains(&a)).unwrap_or(false)
-        }
+        _ => active.map(|a| changed.contains(&a)).unwrap_or(false),
     };
-    if usage_redraw || incidents_changed {
+
+    // When no provider resolves (every provider disabled, or none cached yet),
+    // nothing lands in `changed`, so the redraw gate above stays false and the
+    // tray would keep whatever it last rendered — including the initial
+    // "Loading…" built at setup. Force one redraw in that case so `update_tray`
+    // can paint the `NO_PROVIDERS_STATUS` placeholder. `update_tray` is cheap
+    // and converges (it sets the same placeholder each time), so re-running it
+    // on subsequent empty polls is harmless.
+    let needs_empty_redraw = active.is_none();
+
+    if usage_redraw || incidents_changed || needs_empty_redraw {
         update_tray(app, settings).await;
     }
 
