@@ -91,6 +91,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::set_settings,
+            commands::reset_settings,
             commands::get_usage,
             commands::refresh_now,
             commands::open_terminal,
@@ -144,11 +145,19 @@ pub fn run() {
             for label in ["settings", "panel"] {
                 if let Some(win) = app.get_webview_window(label) {
                     let win_clone = win.clone();
-                    win.on_window_event(move |event| {
-                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    // The detail panel is a popover: dismiss it on blur (click
+                    // outside) so it behaves like the menu-bar surface it mimics.
+                    // The settings window is a normal window, so it stays put.
+                    let dismiss_on_blur = label == "panel";
+                    win.on_window_event(move |event| match event {
+                        tauri::WindowEvent::CloseRequested { api, .. } => {
                             api.prevent_close();
                             let _ = win_clone.hide();
                         }
+                        tauri::WindowEvent::Focused(false) if dismiss_on_blur => {
+                            let _ = win_clone.hide();
+                        }
+                        _ => {}
                     });
                 }
             }
@@ -210,85 +219,95 @@ pub(crate) fn launch_terminal(terminal: crate::settings::TerminalApp) {
 }
 
 fn is_first_run() -> bool {
-    // Heuristic: settings file does not yet exist.
-    directories::ProjectDirs::from("dev", "calebterry", "ai-usage-bar")
-        .map(|d| !d.config_dir().join("settings.json").exists())
-        .unwrap_or(false)
+    // Heuristic: settings file does not yet exist. Keys off the same path
+    // `settings::load`/`save` use so the two can't drift.
+    !settings::settings_path().exists()
 }
 
 /// Background loop: poll on the configured interval and refresh the tray when
 /// the active provider's display changes.
 async fn poll_loop<R: Runtime>(app: AppHandle<R>) {
     loop {
-        let (settings, changed) = {
-            let state = app.state::<AppState>();
-            let settings = state.settings.lock().await.clone();
-            let mut agg = state.aggregator.lock().await;
-            let changed = agg.poll_enabled(&settings).await;
-            (settings, changed)
-        };
-
-        // Edge-triggered quota notifications from the freshly cached snapshots.
-        {
-            let state = app.state::<AppState>();
-            let snapshots = state.aggregator.lock().await.all_cached().clone();
-            let pending = state.notify.lock().await.evaluate(&settings, &snapshots);
-            for n in pending {
-                use tauri_plugin_notification::NotificationExt;
-                let _ = app
-                    .notification()
-                    .builder()
-                    .title(n.title)
-                    .body(n.body)
-                    .show();
-            }
-        }
-
-        // Provider service-status polling (best-effort; never blocks usage).
-        // When disabled we clear any stale incidents so the badge disappears.
-        // Track whether the incident set changed: the tray's incident header is
-        // rebuilt in `update_tray`, so a change here must force a redraw even
-        // when no provider's *usage* changed (esp. in pinned mode below).
-        let incidents_changed = {
-            let state = app.state::<AppState>();
-            let incidents = if settings.check_provider_status {
-                let http = state.http.clone();
-                status::fetch_many(&http, &settings.enabled_providers).await
-            } else {
-                Vec::new()
-            };
-            let mut guard = state.incidents.lock().await;
-            let changed = *guard != incidents;
-            *guard = incidents;
-            changed
-        };
-
-        // Redraw the tray only when a change could affect what it displays.
-        // In Auto mode any provider's change can flip the selection or update
-        // the shown figure, so any non-empty `changed` set qualifies. With an
-        // explicitly pinned provider, only that provider's own change matters.
-        // Either way, an incident-set change repaints the header.
-        let usage_redraw = match settings.active_provider {
-            crate::settings::ActiveProvider::Auto => !changed.is_empty(),
-            _ => {
-                let active = {
-                    let state = app.state::<AppState>();
-                    let agg = state.aggregator.lock().await;
-                    selector::resolve_active(&settings, agg.all_cached())
-                };
-                active.map(|a| changed.contains(&a)).unwrap_or(false)
-            }
-        };
-        let redraw = usage_redraw || incidents_changed;
-        if redraw {
-            update_tray(&app, &settings).await;
-        }
-
-        // Notify any open UI windows that data refreshed.
-        let _ = app.emit("usage-updated", ());
-
+        let settings = app.state::<AppState>().settings.lock().await.clone();
+        refresh_and_render(&app, &settings).await;
         tokio::time::sleep(settings.poll_interval()).await;
     }
+}
+
+/// The single canonical "fetch fresh data and reflect it everywhere" chain:
+/// poll enabled providers → fire edge-triggered quota notifications → refresh
+/// service-status incidents → redraw the tray if anything visible changed →
+/// emit `usage-updated` to open windows.
+///
+/// Every place that wants fresh data — the background poll loop, the tray
+/// "Refresh" item, and the `refresh_now` / `set_api_key` IPC commands — calls
+/// this so the side effects never drift (an earlier hand-rolled copy in the
+/// tray handler silently skipped notifications and incident refresh; the API-key
+/// command skipped the tray redraw and window emit entirely).
+pub(crate) async fn refresh_and_render<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
+    let changed = {
+        let state = app.state::<AppState>();
+        let mut agg = state.aggregator.lock().await;
+        agg.poll_enabled(settings).await
+    };
+
+    // Edge-triggered quota notifications from the freshly cached snapshots.
+    {
+        let state = app.state::<AppState>();
+        let snapshots = state.aggregator.lock().await.all_cached().clone();
+        let pending = state.notify.lock().await.evaluate(settings, &snapshots);
+        for n in pending {
+            use tauri_plugin_notification::NotificationExt;
+            let _ = app
+                .notification()
+                .builder()
+                .title(n.title)
+                .body(n.body)
+                .show();
+        }
+    }
+
+    // Provider service-status polling (best-effort; never blocks usage).
+    // When disabled we clear any stale incidents so the badge disappears.
+    // Track whether the incident set changed: the tray's incident header is
+    // rebuilt in `update_tray`, so a change here must force a redraw even
+    // when no provider's *usage* changed (esp. in pinned mode below).
+    let incidents_changed = {
+        let state = app.state::<AppState>();
+        let incidents = if settings.check_provider_status {
+            let http = state.http.clone();
+            status::fetch_many(&http, &settings.enabled_providers).await
+        } else {
+            Vec::new()
+        };
+        let mut guard = state.incidents.lock().await;
+        let changed = *guard != incidents;
+        *guard = incidents;
+        changed
+    };
+
+    // Redraw the tray only when a change could affect what it displays.
+    // In Auto mode any provider's change can flip the selection or update
+    // the shown figure, so any non-empty `changed` set qualifies. With an
+    // explicitly pinned provider, only that provider's own change matters.
+    // Either way, an incident-set change repaints the header.
+    let usage_redraw = match settings.active_provider {
+        crate::settings::ActiveProvider::Auto => !changed.is_empty(),
+        _ => {
+            let active = {
+                let state = app.state::<AppState>();
+                let agg = state.aggregator.lock().await;
+                selector::resolve_active(settings, agg.all_cached())
+            };
+            active.map(|a| changed.contains(&a)).unwrap_or(false)
+        }
+    };
+    if usage_redraw || incidents_changed {
+        update_tray(app, settings).await;
+    }
+
+    // Notify any open UI windows that data refreshed.
+    let _ = app.emit("usage-updated", ());
 }
 
 /// Re-render the tray icon, title, tooltip, and menu for the active provider.
@@ -372,14 +391,13 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) 
                 app.exit(0);
             }
             ids::REFRESH => {
+                // Route through the canonical chain so a manual refresh fires
+                // quota notifications and refreshes incidents too — not just the
+                // tray redraw the old hand-rolled copy did. Bust the cost cache
+                // so the next cost read rescans, matching `refresh_now`.
                 let settings = app.state::<AppState>().settings.lock().await.clone();
-                {
-                    let state = app.state::<AppState>();
-                    let mut agg = state.aggregator.lock().await;
-                    agg.poll_enabled(&settings).await;
-                }
-                update_tray(&app, &settings).await;
-                let _ = app.emit("usage-updated", ());
+                crate::cost::invalidate();
+                refresh_and_render(&app, &settings).await;
             }
             ids::OPEN_TERMINAL => {
                 let terminal = app

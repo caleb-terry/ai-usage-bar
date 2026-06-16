@@ -54,6 +54,12 @@ export default function Settings() {
     await persist(next);
   };
 
+  // Adopt a settings object the backend already persisted (e.g. reset), without
+  // a second round-trip through `persist`.
+  const replace = (next: SettingsType) => {
+    setReport({ ...report, settings: next });
+  };
+
   const tabs: { id: Tab; label: string; icon: ReactNode }[] = [
     { id: "general", label: t.tabGeneral, icon: <GearIcon /> },
     { id: "providers", label: t.tabProviders, icon: <GridIcon /> },
@@ -85,7 +91,9 @@ export default function Settings() {
           <ProvidersTab t={t} s={s} report={report} update={update} />
         )}
         {tab === "display" && <DisplayTab t={t} s={s} update={update} />}
-        {tab === "advanced" && <AdvancedTab t={t} s={s} update={update} />}
+        {tab === "advanced" && (
+          <AdvancedTab t={t} s={s} update={update} replace={replace} />
+        )}
         {tab === "about" && <AboutTab t={t} />}
       </div>
     </div>

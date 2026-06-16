@@ -12,8 +12,8 @@
 
 use super::pricing::{self, TokenCounts};
 use crate::usage::types::ProviderId;
-use chrono::{DateTime, NaiveDate, Utc};
-use std::collections::HashMap;
+use chrono::{DateTime, Local, NaiveDate};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// One calendar day's accumulated spend for a provider.
@@ -32,10 +32,15 @@ impl DayBucket {
     }
 }
 
-/// Scan one provider's logs, returning per-day buckets keyed by UTC date.
+/// Scan one provider's logs, returning per-day buckets keyed by local date.
 /// Only days on or after `since` are retained.
 pub fn scan(provider: ProviderId, since: NaiveDate) -> HashMap<NaiveDate, DayBucket> {
     let mut out: HashMap<NaiveDate, DayBucket> = HashMap::new();
+    // Claude Code writes the same assistant turn into multiple JSONL files
+    // (resumed sessions, sub-agents). ccusage dedupes by (message.id, requestId)
+    // across all files so a turn is counted once; we mirror that with a set
+    // shared across every file in this provider's scan.
+    let mut seen: HashSet<String> = HashSet::new();
     // Only Claude/Codex write local session logs we can price; API-key
     // providers report a credit balance instead, so they have no buckets.
     for file in log_files(provider) {
@@ -43,7 +48,7 @@ pub fn scan(provider: ProviderId, since: NaiveDate) -> HashMap<NaiveDate, DayBuc
             continue;
         };
         match provider {
-            ProviderId::Claude => scan_claude(&contents, since, &mut out),
+            ProviderId::Claude => scan_claude(&contents, since, &mut out, &mut seen),
             ProviderId::Codex => scan_codex(&contents, since, &mut out),
             _ => {}
         }
@@ -88,6 +93,11 @@ fn home() -> PathBuf {
 }
 
 /// Recursively collect every `*.jsonl` file under `root` (best-effort).
+///
+/// Uses the dir entry's own file type (which does *not* follow symlinks) rather
+/// than `Path::is_dir` (which does): a symlink pointing back up the tree would
+/// otherwise create a cycle and spin the scan forever. Symlinked directories are
+/// simply not descended into; symlinked `.jsonl` files are still read.
 fn collect_jsonl(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
@@ -96,10 +106,13 @@ fn collect_jsonl(root: &Path) -> Vec<PathBuf> {
             continue;
         };
         for entry in entries.flatten() {
+            let Ok(ft) = entry.file_type() else { continue };
             let path = entry.path();
-            if path.is_dir() {
+            if ft.is_dir() {
                 stack.push(path);
-            } else if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+            } else if (ft.is_file() || ft.is_symlink())
+                && path.extension().and_then(|e| e.to_str()) == Some("jsonl")
+            {
                 out.push(path);
             }
         }
@@ -107,10 +120,15 @@ fn collect_jsonl(root: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// The calendar day of an RFC3339 timestamp in the user's *local* time zone.
+/// Buckets must match the user's wall clock — bucketing in UTC would roll
+/// afternoon/evening spend for anyone west of UTC into "tomorrow", so
+/// `today_usd` wouldn't match what they see on the clock. The caller's `today`
+/// / `since` cutoffs are likewise local (see `cost::compute`).
 fn day_of(rfc3339: &str) -> Option<NaiveDate> {
     DateTime::parse_from_rfc3339(rfc3339)
         .ok()
-        .map(|dt| dt.with_timezone(&Utc).date_naive())
+        .map(|dt| dt.with_timezone(&Local).date_naive())
 }
 
 // ---------------------------------------------------------------------------
@@ -120,7 +138,18 @@ fn day_of(rfc3339: &str) -> Option<NaiveDate> {
 /// Parse Claude Code logs. Each assistant turn is one line carrying
 /// `message.usage` (input/output + cache create/read) and `message.model`,
 /// timestamped at the top level.
-fn scan_claude(contents: &str, since: NaiveDate, out: &mut HashMap<NaiveDate, DayBucket>) {
+///
+/// `seen` dedupes turns across files by their `(message.id, requestId)` pair:
+/// Claude Code writes the same assistant turn into multiple JSONL files (resumed
+/// sessions, sub-agents), so without this the same spend is counted once per
+/// copy. This mirrors ccusage's dedup. Lines missing either key fall through and
+/// are counted (they carry no duplicate identity to key on).
+fn scan_claude(
+    contents: &str,
+    since: NaiveDate,
+    out: &mut HashMap<NaiveDate, DayBucket>,
+    seen: &mut HashSet<String>,
+) {
     for line in contents.lines() {
         let line = line.trim();
         if line.is_empty() {
@@ -144,6 +173,18 @@ fn scan_claude(contents: &str, since: NaiveDate, out: &mut HashMap<NaiveDate, Da
         let model = msg.get("model").and_then(|m| m.as_str()).unwrap_or("");
         if model.is_empty() {
             continue;
+        }
+
+        // Skip a turn we've already counted in another file. Only dedupe when
+        // both identifying fields are present; otherwise there's no stable
+        // identity to key on and we count the line as before.
+        if let (Some(mid), Some(rid)) = (
+            msg.get("id").and_then(|m| m.as_str()),
+            v.get("requestId").and_then(|r| r.as_str()),
+        ) {
+            if !seen.insert(format!("{mid}\u{1}{rid}")) {
+                continue;
+            }
         }
         let tc = TokenCounts {
             input: usage_u64(usage, "input_tokens"),
@@ -259,9 +300,13 @@ mod tests {
 
     #[test]
     fn parses_claude_usage_line() {
+        // Use a midday-UTC timestamp so the local-time bucket lands on the same
+        // date regardless of the test machine's zone (any offset within ±12h of
+        // noon stays on the 10th).
         let line = r#"{"timestamp":"2026-06-10T12:00:00.000Z","message":{"model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":200,"cache_creation_input_tokens":50,"cache_read_input_tokens":10}}}"#;
         let mut out = HashMap::new();
-        scan_claude(line, d("2026-06-01"), &mut out);
+        let mut seen = HashSet::new();
+        scan_claude(line, d("2026-06-01"), &mut out, &mut seen);
         let bucket = out.get(&d("2026-06-10")).unwrap();
         assert_eq!(bucket.tokens, 360);
         assert!(bucket.cost_usd > 0.0);
@@ -271,8 +316,35 @@ mod tests {
     fn claude_respects_since_cutoff() {
         let line = r#"{"timestamp":"2026-05-01T12:00:00.000Z","message":{"model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":200}}}"#;
         let mut out = HashMap::new();
-        scan_claude(line, d("2026-06-01"), &mut out);
+        let mut seen = HashSet::new();
+        scan_claude(line, d("2026-06-01"), &mut out, &mut seen);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn claude_dedupes_repeated_turns_across_files() {
+        // Same (message.id, requestId) appearing in two files (e.g. a resumed
+        // session) must be counted once, not twice.
+        let line = r#"{"timestamp":"2026-06-10T12:00:00.000Z","requestId":"req_1","message":{"id":"msg_1","model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":200}}}"#;
+        let mut out = HashMap::new();
+        let mut seen = HashSet::new();
+        scan_claude(line, d("2026-06-01"), &mut out, &mut seen); // file A
+        scan_claude(line, d("2026-06-01"), &mut out, &mut seen); // file B (duplicate)
+        let bucket = out.get(&d("2026-06-10")).unwrap();
+        assert_eq!(bucket.tokens, 300, "duplicate turn must be counted once");
+    }
+
+    #[test]
+    fn claude_counts_lines_without_dedup_keys() {
+        // Lines lacking message.id / requestId have no duplicate identity, so
+        // they're counted each time rather than dropped.
+        let line = r#"{"timestamp":"2026-06-10T12:00:00.000Z","message":{"model":"claude-opus-4-8","usage":{"input_tokens":100,"output_tokens":200}}}"#;
+        let mut out = HashMap::new();
+        let mut seen = HashSet::new();
+        scan_claude(line, d("2026-06-01"), &mut out, &mut seen);
+        scan_claude(line, d("2026-06-01"), &mut out, &mut seen);
+        let bucket = out.get(&d("2026-06-10")).unwrap();
+        assert_eq!(bucket.tokens, 600);
     }
 
     #[test]
@@ -299,7 +371,8 @@ mod tests {
     fn malformed_lines_are_skipped_not_fatal() {
         let input = "not json\n{}\n";
         let mut out = HashMap::new();
-        scan_claude(input, d("2020-01-01"), &mut out);
+        let mut seen = HashSet::new();
+        scan_claude(input, d("2020-01-01"), &mut out, &mut seen);
         scan_codex(input, d("2020-01-01"), &mut out);
         assert!(out.is_empty());
     }

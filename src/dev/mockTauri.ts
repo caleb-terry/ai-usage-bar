@@ -201,6 +201,28 @@ async function invoke(cmd: string, args: Record<string, unknown> = {}): Promise<
       // Mirror the real backend: a settings change re-emits usage-updated.
       queueMicrotask(() => dispatch("usage-updated", null));
       return null;
+    case "reset_settings":
+      // Mirror the backend's `reset_settings`: defaults, keeping the enabled
+      // provider set. Defaults here track `Settings::default()` in settings.rs.
+      settings = {
+        enabled_providers: settings.enabled_providers,
+        active_provider: "auto",
+        display_style: "numbers",
+        show_remaining: false,
+        poll_interval_secs: 180,
+        thresholds: { warn: 50, danger: 80 },
+        windows_float_panel: true,
+        launch_at_login: false,
+        language: "system",
+        default_terminal: "terminal",
+        show_cost_summary: true,
+        cost_history_days: 30,
+        check_provider_status: true,
+        session_quota_notifications: true,
+        quota_warning_notifications: true,
+      };
+      queueMicrotask(() => dispatch("usage-updated", null));
+      return settings;
     case "open_terminal":
       // No real process to spawn in the browser; log so previews can confirm.
       console.log(`[mock] open_terminal → ${settings.default_terminal}`);

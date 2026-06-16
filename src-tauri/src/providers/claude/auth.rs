@@ -9,7 +9,7 @@
 //! we successfully refresh a token, and we write back to the same store we read
 //! from so concurrent CLI sessions stay valid.
 
-use crate::providers::{ProviderError, ProviderResult};
+use crate::providers::{keychain_disabled, whoami_account, ProviderError, ProviderResult};
 use serde::Deserialize;
 use std::path::PathBuf;
 
@@ -185,19 +185,6 @@ pub fn load_credentials() -> ProviderResult<ClaudeCredentials> {
     let path = config_dir().join(".credentials.json");
     let json = std::fs::read_to_string(&path).map_err(|_| ProviderError::Unauthenticated)?;
     parse(&json, CredentialSource::File(path))
-}
-
-/// Whether Keychain access is disabled via the `AIUSAGEBAR_NO_KEYCHAIN` env var.
-fn keychain_disabled() -> bool {
-    std::env::var("AIUSAGEBAR_NO_KEYCHAIN")
-        .map(|v| v != "0" && !v.is_empty())
-        .unwrap_or(false)
-}
-
-fn whoami_account() -> String {
-    std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
-        .unwrap_or_else(|_| "user".to_string())
 }
 
 #[derive(Debug, Deserialize)]

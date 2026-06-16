@@ -49,6 +49,24 @@ impl From<reqwest::Error> for ProviderError {
 
 pub type ProviderResult<T> = Result<T, ProviderError>;
 
+/// Whether OS keystore access is disabled via the `AIUSAGEBAR_NO_KEYCHAIN` env
+/// var. Both subscription providers read their tokens from the keystore as a
+/// fallback; honoring this flag is what lets the unsigned CLI avoid blocking on
+/// the macOS SecurityAgent prompt (see the keychain-startup gotcha in CLAUDE.md).
+pub(crate) fn keychain_disabled() -> bool {
+    std::env::var("AIUSAGEBAR_NO_KEYCHAIN")
+        .map(|v| v != "0" && !v.is_empty())
+        .unwrap_or(false)
+}
+
+/// The current user's account name, used as the keystore entry's account.
+/// `keyring` resolves the active user under this name on each platform.
+pub(crate) fn whoami_account() -> String {
+    std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| "user".to_string())
+}
+
 /// A usage provider (Claude Code, OpenAI Codex, ...).
 #[async_trait]
 pub trait Provider: Send + Sync {

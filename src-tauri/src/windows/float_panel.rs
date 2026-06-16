@@ -33,11 +33,3 @@ pub fn toggle<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
     window.set_focus()?;
     Ok(())
 }
-
-/// Hide the panel when it loses focus (click-outside dismissal).
-#[allow(dead_code)] // wired to the panel window's blur event
-pub fn hide_on_blur<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(window) = app.get_webview_window("panel") {
-        let _ = window.hide();
-    }
-}
