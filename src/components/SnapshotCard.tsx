@@ -132,9 +132,18 @@ export default function SnapshotCard({ snapshot, settings, hero }: Props) {
             </p>
           ))}
 
+        {mode.kind === "credit_balance" && (
+          <div className="balance-readout">
+            <span className="balance-amount">
+              ${(mode.balance_cents / 100).toFixed(2)}
+            </span>
+            <span className="balance-label">credits remaining</span>
+          </div>
+        )}
+
         {mode.kind === "api_key_only" && (
           <p className="empty-state">
-            API-key mode — no subscription limits to display.
+            API-key mode — no usage limits reported.
           </p>
         )}
       </div>
@@ -154,12 +163,16 @@ export default function SnapshotCard({ snapshot, settings, hero }: Props) {
                 / ${(snapshot.extras.extra_usage_cap_cents / 100).toFixed(2)}
               </span>
             )}
-            {snapshot.extras.credit_balance_cents != null && (
-              <span>
-                <em>Credits</em>$
-                {(snapshot.extras.credit_balance_cents / 100).toFixed(2)}
-              </span>
-            )}
+            {/* The credit_balance mode already renders the balance in the body;
+                only surface it in the footer for other modes (e.g. a session
+                provider that also reports leftover credits). */}
+            {snapshot.extras.credit_balance_cents != null &&
+              mode.kind !== "credit_balance" && (
+                <span>
+                  <em>Credits</em>$
+                  {(snapshot.extras.credit_balance_cents / 100).toFixed(2)}
+                </span>
+              )}
             {snapshot.extras.on_demand_resets != null && (
               <span>
                 <em>Resets avail.</em>

@@ -75,7 +75,7 @@ function snapshots(jitter = 0): Record<string, UsageSnapshot> {
       plan_label: "credits",
       stale: false,
       fetched_at: hoursFromNow(0),
-      mode: { kind: "api_key_only" },
+      mode: { kind: "credit_balance", balance_cents: 1850 + jitter * 5 },
       extras: { credit_balance_cents: 1850 + jitter * 5 },
     },
     elevenlabs: {

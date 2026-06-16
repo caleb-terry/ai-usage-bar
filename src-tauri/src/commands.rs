@@ -7,7 +7,7 @@ use crate::usage::selector;
 use crate::usage::types::{ProviderId, UsageSnapshot};
 use serde::Serialize;
 use std::collections::HashMap;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 /// All current snapshots plus the resolved active provider, for the UI.
 #[derive(Debug, Serialize)]
@@ -25,10 +25,13 @@ pub async fn get_settings(state: State<'_, AppState>) -> Result<Settings, String
     Ok(state.settings.lock().await.clone())
 }
 
+/// Persist a full settings object from the Settings UI. Routes through the same
+/// canonical `apply_settings` path the tray menu uses, so a change made in the
+/// window immediately syncs autostart, re-renders the tray, and re-emits
+/// `usage-updated` — rather than silently waiting for the next poll.
 #[tauri::command]
-pub async fn set_settings(state: State<'_, AppState>, settings: Settings) -> Result<(), String> {
-    crate::settings::save(&settings).map_err(|e| e.to_string())?;
-    *state.settings.lock().await = settings;
+pub async fn set_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
+    crate::apply_settings(&app, settings).await;
     Ok(())
 }
 

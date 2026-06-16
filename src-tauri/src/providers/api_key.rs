@@ -15,24 +15,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// The environment variable consulted for each API-key provider.
+/// The environment variable consulted for each API-key provider. Subscription
+/// providers return `None`. Sourced from the central provider metadata table.
 pub fn env_var(provider: ProviderId) -> Option<&'static str> {
-    match provider {
-        ProviderId::OpenRouter => Some("OPENROUTER_API_KEY"),
-        ProviderId::ElevenLabs => Some("ELEVENLABS_API_KEY"),
-        ProviderId::Groq => Some("GROQ_API_KEY"),
-        ProviderId::Deepgram => Some("DEEPGRAM_API_KEY"),
-        ProviderId::Zai => Some("ZAI_API_KEY"),
-        ProviderId::MiniMax => Some("MINIMAX_API_KEY"),
-        ProviderId::Gemini => Some("GEMINI_API_KEY"),
-        ProviderId::Grok => Some("XAI_API_KEY"),
-        ProviderId::DeepSeek => Some("DEEPSEEK_API_KEY"),
-        ProviderId::Moonshot => Some("MOONSHOT_API_KEY"),
-        ProviderId::Mistral => Some("MISTRAL_API_KEY"),
-        ProviderId::Perplexity => Some("PERPLEXITY_API_KEY"),
-        // Subscription providers don't use a stored API key here.
-        ProviderId::Claude | ProviderId::Codex => None,
-    }
+    provider.env_var()
 }
 
 /// On-disk config holding per-provider API keys.

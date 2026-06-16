@@ -38,7 +38,11 @@ impl From<reqwest::Error> for ProviderError {
         if e.status() == Some(reqwest::StatusCode::TOO_MANY_REQUESTS) {
             ProviderError::RateLimited
         } else {
-            ProviderError::Network(e.to_string())
+            // Strip the URL before stringifying: on a transport error reqwest's
+            // Display embeds the full request URL, which for query-param-auth
+            // providers (Gemini's `?key=`) would leak the API key into logs.
+            // `without_url()` drops it; userinfo was already redacted by reqwest.
+            ProviderError::Network(e.without_url().to_string())
         }
     }
 }

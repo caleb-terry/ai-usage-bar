@@ -65,25 +65,15 @@ struct StatusBlock {
     description: String,
 }
 
-/// The statuspage.io status endpoint for each provider, when one exists.
-/// Anthropic's `status.anthropic.com` redirects to `status.claude.com`; we
-/// point at the canonical host directly to avoid a redirect hop. Providers
-/// without a known statuspage return `None` and are simply not polled.
-fn status_url(provider: ProviderId) -> Option<&'static str> {
-    match provider {
-        ProviderId::Claude => Some("https://status.claude.com/api/v2/status.json"),
-        ProviderId::Codex => Some("https://status.openai.com/api/v2/status.json"),
-        ProviderId::Groq => Some("https://groqstatus.com/api/v2/status.json"),
-        // ElevenLabs/Deepgram/z.ai/MiniMax: no public statuspage.io we poll.
-        _ => None,
-    }
-}
-
 /// Fetch and normalize one provider's status. Returns `None` on any failure (or
 /// when the provider has no status page) so the caller can leave the previous
 /// (or empty) state untouched rather than flashing a spurious badge.
+///
+/// The statuspage.io endpoint comes from the central provider metadata table.
+/// Anthropic's `status.anthropic.com` redirects to `status.claude.com`; the
+/// table points at the canonical host directly to avoid a redirect hop.
 pub async fn fetch_one(http: &reqwest::Client, provider: ProviderId) -> Option<Incident> {
-    let url = status_url(provider)?;
+    let url = provider.status_url()?;
     let resp = http.get(url).send().await.ok()?;
     if !resp.status().is_success() {
         return None;

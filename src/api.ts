@@ -3,38 +3,54 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
-export type ProviderId =
-  | "claude"
-  | "codex"
-  | "openrouter"
-  | "elevenlabs"
-  | "groq"
-  | "deepgram"
-  | "zai"
-  | "minimax"
-  | "gemini"
-  | "grok"
-  | "deepseek"
-  | "moonshot"
-  | "mistral"
-  | "perplexity";
+/// Single source of truth for provider metadata, mirroring Rust's
+/// `PROVIDER_META` in `src-tauri/src/usage/types.rs`. Everything below
+/// (`ProviderId`, the label/accent maps, `API_KEY_PROVIDERS`) is *derived* from
+/// this one table so adding a provider is a single row edit on each side. The
+/// Rust test `provider_metadata_matches_typescript` guards against drift.
+///
+/// `kind: "api_key"` marks the non-subscription providers (everything except
+/// the two CLI subscription providers, Claude and Codex).
+interface ProviderMeta {
+  id: string;
+  label: string;
+  tabLabel: string;
+  accent: string;
+  kind: "subscription" | "api_key";
+}
+
+const PROVIDER_META = [
+  { id: "claude", label: "Claude Code", tabLabel: "Claude", accent: "#d97757", kind: "subscription" },
+  { id: "codex", label: "Codex", tabLabel: "Codex", accent: "#10a37f", kind: "subscription" },
+  { id: "openrouter", label: "OpenRouter", tabLabel: "OpenRouter", accent: "#6566f1", kind: "api_key" },
+  { id: "elevenlabs", label: "ElevenLabs", tabLabel: "11Labs", accent: "#000000", kind: "api_key" },
+  { id: "groq", label: "Groq", tabLabel: "Groq", accent: "#f55036", kind: "api_key" },
+  { id: "deepgram", label: "Deepgram", tabLabel: "Deepgram", accent: "#13ef93", kind: "api_key" },
+  { id: "zai", label: "z.ai", tabLabel: "z.ai", accent: "#3b82f6", kind: "api_key" },
+  { id: "minimax", label: "MiniMax", tabLabel: "MiniMax", accent: "#ff4f4f", kind: "api_key" },
+  { id: "gemini", label: "Gemini", tabLabel: "Gemini", accent: "#4285f4", kind: "api_key" },
+  { id: "grok", label: "Grok", tabLabel: "Grok", accent: "#1a1a1a", kind: "api_key" },
+  { id: "deepseek", label: "DeepSeek", tabLabel: "DeepSeek", accent: "#4d6bfe", kind: "api_key" },
+  { id: "moonshot", label: "Moonshot", tabLabel: "Moonshot", accent: "#16191e", kind: "api_key" },
+  { id: "mistral", label: "Mistral", tabLabel: "Mistral", accent: "#fa520f", kind: "api_key" },
+  { id: "perplexity", label: "Perplexity", tabLabel: "Perplexity", accent: "#20808d", kind: "api_key" },
+] as const satisfies readonly ProviderMeta[];
+
+export type ProviderId = (typeof PROVIDER_META)[number]["id"];
 export type ActiveProvider = "auto" | "claude" | "codex";
 
-/// API-key providers (everything except the two CLI subscription providers).
-export const API_KEY_PROVIDERS: ProviderId[] = [
-  "openrouter",
-  "elevenlabs",
-  "groq",
-  "deepgram",
-  "zai",
-  "minimax",
-  "gemini",
-  "grok",
-  "deepseek",
-  "moonshot",
-  "mistral",
-  "perplexity",
-];
+/// API-key providers (everything except the two CLI subscription providers),
+/// derived from the metadata table.
+export const API_KEY_PROVIDERS: ProviderId[] = PROVIDER_META.filter(
+  (m) => m.kind === "api_key",
+).map((m) => m.id);
+
+/// The CLI subscription providers (Claude, Codex), derived from the table so a
+/// future subscription provider appears in the Connections section automatically.
+export const SUBSCRIPTION_PROVIDERS: ProviderId[] = PROVIDER_META.filter(
+  (m) => m.kind === "subscription",
+).map((m) => m.id);
+
 export type DisplayStyle = "numbers" | "bars";
 export type Language = "system" | "en";
 export type TerminalApp = "terminal" | "iterm" | "warp" | "ghostty";
@@ -54,6 +70,7 @@ export type DisplayMode =
       limit_cents?: number;
       reset_at?: string;
     }
+  | { kind: "credit_balance"; balance_cents: number }
   | { kind: "unauthenticated" }
   | { kind: "api_key_only" };
 
@@ -159,59 +176,28 @@ export function formatUsd(n: number): string {
   return `$${n.toFixed(2)}`;
 }
 
-export const PROVIDER_LABEL: Record<ProviderId, string> = {
-  claude: "Claude Code",
-  codex: "Codex",
-  openrouter: "OpenRouter",
-  elevenlabs: "ElevenLabs",
-  groq: "Groq",
-  deepgram: "Deepgram",
-  zai: "z.ai",
-  minimax: "MiniMax",
-  gemini: "Gemini",
-  grok: "Grok",
-  deepseek: "DeepSeek",
-  moonshot: "Moonshot",
-  mistral: "Mistral",
-  perplexity: "Perplexity",
-};
+/// Build a `Record<ProviderId, T>` by projecting one field out of the metadata
+/// table, so the label/accent maps can never list a different provider set than
+/// `PROVIDER_META`.
+function metaMap<T>(pick: (m: ProviderMeta) => T): Record<ProviderId, T> {
+  return Object.fromEntries(
+    PROVIDER_META.map((m) => [m.id, pick(m)]),
+  ) as Record<ProviderId, T>;
+}
 
-/// Short label used on the compact tab chips.
-export const PROVIDER_TAB_LABEL: Record<ProviderId, string> = {
-  claude: "Claude",
-  codex: "Codex",
-  openrouter: "OpenRouter",
-  elevenlabs: "11Labs",
-  groq: "Groq",
-  deepgram: "Deepgram",
-  zai: "z.ai",
-  minimax: "MiniMax",
-  gemini: "Gemini",
-  grok: "Grok",
-  deepseek: "DeepSeek",
-  moonshot: "Moonshot",
-  mistral: "Mistral",
-  perplexity: "Perplexity",
-};
+/// Human-facing display names, derived from the metadata table.
+export const PROVIDER_LABEL: Record<ProviderId, string> = metaMap((m) => m.label);
+
+/// Short label used on the compact tab chips, derived from the metadata table.
+export const PROVIDER_TAB_LABEL: Record<ProviderId, string> = metaMap(
+  (m) => m.tabLabel,
+);
 
 /// Per-provider brand accent. Drives the tab underline and the hero card's
 /// fill, so the panel reads at a glance which provider you're looking at.
-export const PROVIDER_ACCENT: Record<ProviderId, string> = {
-  claude: "#d97757",
-  codex: "#10a37f",
-  openrouter: "#6566f1",
-  elevenlabs: "#000000",
-  groq: "#f55036",
-  deepgram: "#13ef93",
-  zai: "#3b82f6",
-  minimax: "#ff4f4f",
-  gemini: "#4285f4",
-  grok: "#1a1a1a",
-  deepseek: "#4d6bfe",
-  moonshot: "#16191e",
-  mistral: "#fa520f",
-  perplexity: "#20808d",
-};
+export const PROVIDER_ACCENT: Record<ProviderId, string> = metaMap(
+  (m) => m.accent,
+);
 
 /// Color for a service-status severity badge.
 export function severityColor(s: Severity): string {

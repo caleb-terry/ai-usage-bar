@@ -265,6 +265,23 @@
   background: rgba(255, 255, 255, 0.2);
 }
 
+/* Credit-balance providers (OpenRouter, DeepSeek, …) have no usage bars; show
+   the dollar balance as the card's headline instead. */
+.balance-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.balance-amount {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.balance-label {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
 .stale-badge {
   font-size: 11px;
   font-weight: 600;

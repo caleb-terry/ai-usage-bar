@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   CostSummary,
   PROVIDER_ACCENT,
@@ -170,14 +171,11 @@ export default function UsageDetail() {
         </button>
         <button onClick={() => openTerminal()}>Terminal</button>
         <button
-          onClick={() =>
-            import("@tauri-apps/api/webviewWindow").then(
-              ({ WebviewWindow }) => {
-                const w = WebviewWindow.getByLabel("settings");
-                w.then((win) => win?.show().then(() => win?.setFocus()));
-              },
-            )
-          }
+          onClick={() => {
+            WebviewWindow.getByLabel("settings").then((win) =>
+              win?.show().then(() => win?.setFocus()),
+            );
+          }}
         >
           Settings
         </button>

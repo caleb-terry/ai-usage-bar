@@ -20,7 +20,7 @@ use ai_usage_bar_lib::cost;
 use ai_usage_bar_lib::providers::{self, api_key};
 use ai_usage_bar_lib::settings;
 use ai_usage_bar_lib::status;
-use ai_usage_bar_lib::usage::types::{DisplayMode, ProviderId, ProviderKind};
+use ai_usage_bar_lib::usage::types::{ProviderId, ProviderKind};
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::process::ExitCode;
@@ -142,10 +142,18 @@ fn cmd_usage(args: &[String]) -> Result<ExitCode, String> {
 
     let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
     rt.block_on(async move {
+        // Fetch all requested providers concurrently rather than serially, so a
+        // multi-provider `usage` call is bounded by the slowest provider.
+        let handles: Vec<_> = providers
+            .iter()
+            .map(|&id| (id, tokio::spawn(async move { providers::fetch_once(id).await })))
+            .collect();
         let mut entries = Vec::new();
-        for id in &providers {
-            let result = providers::fetch_once(*id).await;
-            entries.push((*id, result));
+        for (id, handle) in handles {
+            let result = handle
+                .await
+                .unwrap_or_else(|e| Err(providers::ProviderError::Other(e.to_string())));
+            entries.push((id, result));
         }
 
         let incidents = if want_status {
@@ -180,7 +188,9 @@ fn print_usage_text(
                 } else {
                     format!(" ({})", snap.plan_label)
                 };
-                let body = describe_mode(&snap.mode, &snap.extras);
+                // Reuse the model's one-line presentation so the CLI never drifts
+                // from the tray/menu wording. `show_remaining = false` → "used".
+                let body = snap.mode.status_summary(false);
                 let stale = if snap.stale { " [stale]" } else { "" };
                 println!("{}{plan}: {body}{stale}", id.label());
             }
@@ -194,27 +204,6 @@ fn print_usage_text(
         if inc.severity.is_incident() {
             println!("⚠ {}: {}", inc.provider.label(), inc.description);
         }
-    }
-}
-
-fn describe_mode(
-    mode: &DisplayMode,
-    extras: &ai_usage_bar_lib::usage::types::DetailExtras,
-) -> String {
-    match mode {
-        DisplayMode::Session { primary, secondary } => {
-            let mut s = format!("{} {:.0}% used", primary.label, primary.utilization);
-            if let Some(sec) = secondary {
-                s += &format!(" · {} {:.0}% used", sec.label, sec.utilization);
-            }
-            s
-        }
-        DisplayMode::SpendCap { utilization, .. } => format!("spend cap {utilization:.0}% used"),
-        DisplayMode::ApiKeyOnly => match extras.credit_balance_cents {
-            Some(cents) => format!("API key · ${:.2} credits", cents as f64 / 100.0),
-            None => "API key (no subscription limits)".to_string(),
-        },
-        DisplayMode::Unauthenticated => "not authenticated".to_string(),
     }
 }
 

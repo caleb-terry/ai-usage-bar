@@ -156,13 +156,11 @@ impl Settings {
         self.enabled_providers.contains(&id)
     }
 
-    /// Apply the show-remaining preference to a raw utilization.
+    /// Apply the show-remaining preference to a raw utilization. Delegates to
+    /// the single implementation in `usage::types` so the tray figure and the
+    /// settings figure can never drift.
     pub fn display_pct(&self, utilization: f32) -> f32 {
-        if self.show_remaining {
-            100.0 - utilization
-        } else {
-            utilization
-        }
+        crate::usage::types::display_pct(utilization, self.show_remaining)
     }
 }
 

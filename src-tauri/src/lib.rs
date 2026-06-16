@@ -23,7 +23,7 @@ use crate::settings::{ActiveProvider, DisplayStyle, Settings};
 use crate::state::AppState;
 use crate::tray::menu::ids;
 use crate::usage::selector;
-use crate::usage::types::{DisplayMode, ProviderId, ProviderKind, UsageSnapshot};
+use crate::usage::types::{ProviderId, ProviderKind, UsageSnapshot};
 use std::sync::Arc;
 use tauri::image::Image;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -246,7 +246,10 @@ async fn poll_loop<R: Runtime>(app: AppHandle<R>) {
 
         // Provider service-status polling (best-effort; never blocks usage).
         // When disabled we clear any stale incidents so the badge disappears.
-        {
+        // Track whether the incident set changed: the tray's incident header is
+        // rebuilt in `update_tray`, so a change here must force a redraw even
+        // when no provider's *usage* changed (esp. in pinned mode below).
+        let incidents_changed = {
             let state = app.state::<AppState>();
             let incidents = if settings.check_provider_status {
                 let http = state.http.clone();
@@ -254,17 +257,30 @@ async fn poll_loop<R: Runtime>(app: AppHandle<R>) {
             } else {
                 Vec::new()
             };
-            *state.incidents.lock().await = incidents;
-        }
-
-        // Always refresh on the first pass; afterwards only when the active
-        // provider changed.
-        let active = {
-            let state = app.state::<AppState>();
-            let agg = state.aggregator.lock().await;
-            selector::resolve_active(&settings, agg.all_cached())
+            let mut guard = state.incidents.lock().await;
+            let changed = *guard != incidents;
+            *guard = incidents;
+            changed
         };
-        if active.map(|a| changed.contains(&a)).unwrap_or(false) || !changed.is_empty() {
+
+        // Redraw the tray only when a change could affect what it displays.
+        // In Auto mode any provider's change can flip the selection or update
+        // the shown figure, so any non-empty `changed` set qualifies. With an
+        // explicitly pinned provider, only that provider's own change matters.
+        // Either way, an incident-set change repaints the header.
+        let usage_redraw = match settings.active_provider {
+            crate::settings::ActiveProvider::Auto => !changed.is_empty(),
+            _ => {
+                let active = {
+                    let state = app.state::<AppState>();
+                    let agg = state.aggregator.lock().await;
+                    selector::resolve_active(&settings, agg.all_cached())
+                };
+                active.map(|a| changed.contains(&a)).unwrap_or(false)
+            }
+        };
+        let redraw = usage_redraw || incidents_changed;
+        if redraw {
             update_tray(&app, &settings).await;
         }
 
@@ -300,7 +316,7 @@ async fn update_tray<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
         let image = Image::new_owned(rendered.rgba, rendered.width, rendered.height);
         let _ = tray.set_icon(Some(image));
         let _ = tray.set_icon_as_template(rendered.is_template);
-        let _ = tray.set_title(Some(tray_title(&snapshot, settings)));
+        let _ = tray.set_title(Some(snapshot.mode.tray_title(settings.show_remaining)));
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -309,7 +325,7 @@ async fn update_tray<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
         let _ = tray.set_icon(Some(image));
     }
 
-    let _ = tray.set_tooltip(Some(tooltip(&snapshot, settings)));
+    let _ = tray.set_tooltip(Some(status_line(&snapshot, settings)));
 
     // Format the worst active service incident, if any, as a second header row.
     let incident_line = {
@@ -328,31 +344,9 @@ async fn update_tray<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
     }
 }
 
-/// Short title shown next to the macOS menu bar glyph: only the 5-hour session
-/// percentage, e.g. "45%". Respects the user's used/remaining preference via
-/// `display_pct`. Weekly is intentionally omitted here — it lives in the panel.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn tray_title(snapshot: &UsageSnapshot, settings: &Settings) -> String {
-    match &snapshot.mode {
-        DisplayMode::Session { primary, .. } => {
-            format!(
-                "{}%",
-                settings.display_pct(primary.utilization).round() as i32
-            )
-        }
-        DisplayMode::SpendCap { utilization, .. } => {
-            format!("{}%", settings.display_pct(*utilization).round() as i32)
-        }
-        DisplayMode::Unauthenticated => "—".to_string(),
-        DisplayMode::ApiKeyOnly => "key".to_string(),
-    }
-}
-
-fn tooltip(snapshot: &UsageSnapshot, settings: &Settings) -> String {
-    status_line(snapshot, settings)
-}
-
-/// Full one-line status, used in tooltip and menu header.
+/// Full one-line status (provider · plan · body), used in the tooltip and menu
+/// header. The mode-specific body lives on `DisplayMode::status_summary`; this
+/// only wraps it with the provider/plan prefix and stale marker.
 fn status_line(snapshot: &UsageSnapshot, settings: &Settings) -> String {
     let provider = snapshot.provider.label();
     let plan = if snapshot.plan_label.is_empty() {
@@ -361,33 +355,7 @@ fn status_line(snapshot: &UsageSnapshot, settings: &Settings) -> String {
         format!(" · {}", snapshot.plan_label)
     };
     let stale = if snapshot.stale { " (stale)" } else { "" };
-    let label = if settings.show_remaining {
-        "left"
-    } else {
-        "used"
-    };
-
-    let body = match &snapshot.mode {
-        DisplayMode::Session { primary, secondary } => {
-            let p = settings.display_pct(primary.utilization).round() as i32;
-            match secondary {
-                Some(s) => format!(
-                    "5h {p}% {label} · Wk {}% {label}",
-                    settings.display_pct(s.utilization).round() as i32
-                ),
-                None => format!("5h {p}% {label}"),
-            }
-        }
-        DisplayMode::SpendCap { utilization, .. } => {
-            format!(
-                "Spend cap {}% {label}",
-                settings.display_pct(*utilization).round() as i32
-            )
-        }
-        DisplayMode::Unauthenticated => "Sign in required".to_string(),
-        DisplayMode::ApiKeyOnly => "API key mode — no subscription limits".to_string(),
-    };
-
+    let body = snapshot.mode.status_summary(settings.show_remaining);
     format!("{provider}{plan} · {body}{stale}")
 }
 
@@ -437,17 +405,7 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) 
                 mutate_settings(&app, |s| s.show_remaining = !s.show_remaining).await;
             }
             ids::LAUNCH_AT_LOGIN => {
-                let enable = {
-                    let state = app.state::<AppState>();
-                    let mut s = state.settings.lock().await;
-                    s.launch_at_login = !s.launch_at_login;
-                    let _ = settings::save(&s);
-                    s.launch_at_login
-                };
-                let mgr = app.autolaunch();
-                let _ = if enable { mgr.enable() } else { mgr.disable() };
-                let settings = app.state::<AppState>().settings.lock().await.clone();
-                update_tray(&app, &settings).await;
+                mutate_settings(&app, |s| s.launch_at_login = !s.launch_at_login).await;
             }
             _ => {}
         }
@@ -462,20 +420,49 @@ async fn set_style<R: Runtime>(app: &AppHandle<R>, value: DisplayStyle) {
     mutate_settings(app, |s| s.display_style = value).await;
 }
 
-/// Apply a settings change, persist it, refresh the tray, and notify the UI.
+/// Mutate settings in place via a closure, then run the canonical apply chain.
+/// Used by the tray menu's checkbox/submenu handlers.
 async fn mutate_settings<R, F>(app: &AppHandle<R>, f: F)
 where
     R: Runtime,
     F: FnOnce(&mut Settings),
 {
-    let settings = {
+    let next = {
         let state = app.state::<AppState>();
         let mut s = state.settings.lock().await;
         f(&mut s);
-        let _ = settings::save(&s);
         s.clone()
     };
-    update_tray(app, &settings).await;
+    apply_settings(app, next).await;
+}
+
+/// The single canonical settings-mutation path. Every settings change — from the
+/// tray menu *and* from the Settings window's `set_settings` IPC command — flows
+/// through here so the side effects never diverge: sync autostart when
+/// `launch_at_login` changed, persist to disk, update in-memory state, re-render
+/// the tray, and notify open windows.
+pub(crate) async fn apply_settings<R: Runtime>(app: &AppHandle<R>, next: Settings) {
+    let state = app.state::<AppState>();
+
+    // Detect a launch-at-login transition against the previous value so we only
+    // touch the autostart plugin when it actually changed.
+    let prev_launch = {
+        let mut guard = state.settings.lock().await;
+        let prev = guard.launch_at_login;
+        *guard = next.clone();
+        prev
+    };
+    if next.launch_at_login != prev_launch {
+        let mgr = app.autolaunch();
+        let _ = if next.launch_at_login {
+            mgr.enable()
+        } else {
+            mgr.disable()
+        };
+    }
+
+    let _ = settings::save(&next);
+    update_tray(app, &next).await;
     let _ = app.emit("usage-updated", ());
 }
 

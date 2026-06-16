@@ -172,8 +172,11 @@ fn render_bars(img: &mut RgbaImage, snapshot: &UsageSnapshot, settings: &Setting
             let y0 = (SIZE - bar_h) / 2;
             draw_bar(img, y0, *utilization);
         }
-        DisplayMode::Unauthenticated | DisplayMode::ApiKeyOnly => {
-            // A single dim track to indicate "no data".
+        DisplayMode::CreditBalance { .. }
+        | DisplayMode::Unauthenticated
+        | DisplayMode::ApiKeyOnly => {
+            // No percentage to chart (credit balance / key-only / signed-out):
+            // a single dim track stands in for "no usage bar".
             let y0 = (SIZE - bar_h) / 2;
             fill_rect(img, pad, y0, w, bar_h, track);
         }
@@ -202,6 +205,13 @@ fn render_numbers(
         DisplayMode::SpendCap { utilization, .. } => {
             let v = settings.display_pct(*utilization).round() as i32;
             (format!("{v}"), Some("cap".to_string()))
+        }
+        // Credit balance: bake the dollar figure into the icon. Use the same
+        // formatter as the tray title so macOS-Numbers (which shows both the
+        // baked glyph *and* a title) renders one consistent value, e.g.
+        // "$18.50" — not "$18" beside "$18.50".
+        DisplayMode::CreditBalance { balance_cents } => {
+            (crate::usage::types::format_usd_cents(*balance_cents), None)
         }
         DisplayMode::Unauthenticated => ("—".to_string(), None),
         DisplayMode::ApiKeyOnly => ("key".to_string(), None),
