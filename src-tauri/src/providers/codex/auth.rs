@@ -8,7 +8,7 @@
 //! the same store Codex reads from, atomically, to avoid invalidating
 //! concurrent CLI sessions.
 
-use crate::providers::{ProviderError, ProviderResult};
+use crate::providers::{keychain_disabled, whoami_account, ProviderError, ProviderResult};
 use serde::Deserialize;
 use std::path::PathBuf;
 
@@ -125,19 +125,6 @@ pub fn load_credentials() -> ProviderResult<CodexCredentials> {
     }
 
     Err(ProviderError::Unauthenticated)
-}
-
-/// Whether Keychain access is disabled via the `AIUSAGEBAR_NO_KEYCHAIN` env var.
-fn keychain_disabled() -> bool {
-    std::env::var("AIUSAGEBAR_NO_KEYCHAIN")
-        .map(|v| v != "0" && !v.is_empty())
-        .unwrap_or(false)
-}
-
-fn whoami_account() -> String {
-    std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
-        .unwrap_or_else(|_| "user".to_string())
 }
 
 #[derive(Debug, Deserialize)]

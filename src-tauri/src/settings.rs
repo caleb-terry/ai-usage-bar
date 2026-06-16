@@ -164,7 +164,9 @@ impl Settings {
     }
 }
 
-fn settings_path() -> PathBuf {
+/// Absolute path of the persisted settings file. Crate-visible so the
+/// first-run check in `lib.rs` keys off the same path rather than rebuilding it.
+pub(crate) fn settings_path() -> PathBuf {
     let dir = directories::ProjectDirs::from("dev", "calebterry", "ai-usage-bar")
         .map(|d| d.config_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."));

@@ -35,6 +35,25 @@ pub async fn set_settings(app: AppHandle, settings: Settings) -> Result<(), Stri
     Ok(())
 }
 
+/// Reset all settings to their defaults, preserving only the user's enabled
+/// provider set, then route through the canonical apply path. Returns the new
+/// settings so the UI doesn't have to re-derive the default values itself — the
+/// single source of truth is `Settings::default()`, not a hand-maintained copy
+/// in the frontend.
+#[tauri::command]
+pub async fn reset_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Settings, String> {
+    let enabled = state.settings.lock().await.enabled_providers.clone();
+    let next = Settings {
+        enabled_providers: enabled,
+        ..Settings::default()
+    };
+    crate::apply_settings(&app, next.clone()).await;
+    Ok(next)
+}
+
 #[tauri::command]
 pub async fn get_usage(state: State<'_, AppState>) -> Result<UsageReport, String> {
     let settings = state.settings.lock().await.clone();
@@ -60,14 +79,18 @@ pub async fn open_terminal(state: State<'_, AppState>) -> Result<(), String> {
 
 /// Force an immediate poll of all enabled providers, returning the fresh report.
 /// Also busts the local cost-scan cache so the next cost read rescans logs.
+///
+/// Routes through the canonical `refresh_and_render` chain so a manual refresh
+/// fires quota notifications, refreshes incidents, redraws the tray, and emits
+/// `usage-updated` — the same side effects the background poll loop produces.
 #[tauri::command]
-pub async fn refresh_now(state: State<'_, AppState>) -> Result<UsageReport, String> {
+pub async fn refresh_now(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<UsageReport, String> {
     let settings = state.settings.lock().await.clone();
-    {
-        let mut aggregator = state.aggregator.lock().await;
-        aggregator.poll_enabled(&settings).await;
-    }
     crate::cost::invalidate();
+    crate::refresh_and_render(&app, &settings).await;
     get_usage(state).await
 }
 
@@ -77,6 +100,7 @@ pub async fn refresh_now(state: State<'_, AppState>) -> Result<UsageReport, Stri
 /// which authenticate via their CLI, not a stored key.
 #[tauri::command]
 pub async fn set_api_key(
+    app: AppHandle,
     state: State<'_, AppState>,
     provider: ProviderId,
     key: String,
@@ -95,9 +119,12 @@ pub async fn set_api_key(
     )
     .map_err(|e| e.to_string())?;
 
-    // Re-poll so the UI reflects the change immediately.
+    // Re-poll *and* re-render so the change reflects immediately in every open
+    // window and the tray — routing through the canonical chain rather than a
+    // bare `poll_enabled`, which left the tray and open windows showing stale
+    // data until the next background poll.
     let settings = state.settings.lock().await.clone();
-    state.aggregator.lock().await.poll_enabled(&settings).await;
+    crate::refresh_and_render(&app, &settings).await;
     Ok(())
 }
 

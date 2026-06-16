@@ -27,13 +27,19 @@ export function ApiKeyProviderRow({
 }) {
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const save = async (key: string) => {
     setSaving(true);
+    setError(null);
     try {
       await setApiKey(id, key);
       setDraft("");
       onKeyChange();
+    } catch (e) {
+      // A keyring write can fail (locked keychain, denied access). Surface it
+      // instead of silently leaving the field looking saved.
+      setError(String(e));
     } finally {
       setSaving(false);
     }
@@ -81,6 +87,7 @@ export function ApiKeyProviderRow({
           </button>
         )}
       </div>
+      {error && <div className="apikey-error">{error}</div>}
     </div>
   );
 }

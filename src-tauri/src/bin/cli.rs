@@ -146,7 +146,12 @@ fn cmd_usage(args: &[String]) -> Result<ExitCode, String> {
         // multi-provider `usage` call is bounded by the slowest provider.
         let handles: Vec<_> = providers
             .iter()
-            .map(|&id| (id, tokio::spawn(async move { providers::fetch_once(id).await })))
+            .map(|&id| {
+                (
+                    id,
+                    tokio::spawn(async move { providers::fetch_once(id).await }),
+                )
+            })
             .collect();
         let mut entries = Vec::new();
         for (id, handle) in handles {
@@ -157,7 +162,13 @@ fn cmd_usage(args: &[String]) -> Result<ExitCode, String> {
         }
 
         let incidents = if want_status {
-            let http = reqwest::Client::new();
+            // Bound the status fetch like the GUI path does — an unbounded
+            // default client would hang the CLI indefinitely on a stalled
+            // statuspage host.
+            let http = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(20))
+                .build()
+                .unwrap_or_default();
             status::fetch_many(&http, &providers).await
         } else {
             Vec::new()

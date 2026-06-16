@@ -4,6 +4,12 @@ Spin up a throwaway Windows 11 desktop in a container to install and smoke-test
 the Windows build of AI Usage Bar (`.msi` / `.exe`) without owning a Windows
 machine.
 
+> **Just need to know if the Windows target compiles?** Don't boot this VM —
+> run [`scripts/win-check.sh`](scripts/win-check.sh) instead. It cross-compiles
+> the Rust backend for Windows in a lightweight Linux container (no KVM, no
+> Windows host), catching `#[cfg(windows)]` errors that CI never checks. This VM
+> is for the heavier job: installing and clicking through the built installer.
+
 It runs a **real Windows 11 VM** ([`dockurr/windows`](https://github.com/dockur/windows))
 via KVM/QEMU — a genuine GUI desktop, not Windows Server Core. That matters
 here: the app is a WebView2-backed GUI that lives in the system tray, so there's

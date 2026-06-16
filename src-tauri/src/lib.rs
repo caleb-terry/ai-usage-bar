@@ -91,6 +91,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
             commands::set_settings,
+            commands::reset_settings,
             commands::get_usage,
             commands::refresh_now,
             commands::open_terminal,
@@ -144,11 +145,19 @@ pub fn run() {
             for label in ["settings", "panel"] {
                 if let Some(win) = app.get_webview_window(label) {
                     let win_clone = win.clone();
-                    win.on_window_event(move |event| {
-                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    // The detail panel is a popover: dismiss it on blur (click
+                    // outside) so it behaves like the menu-bar surface it mimics.
+                    // The settings window is a normal window, so it stays put.
+                    let dismiss_on_blur = label == "panel";
+                    win.on_window_event(move |event| match event {
+                        tauri::WindowEvent::CloseRequested { api, .. } => {
                             api.prevent_close();
                             let _ = win_clone.hide();
                         }
+                        tauri::WindowEvent::Focused(false) if dismiss_on_blur => {
+                            let _ = win_clone.hide();
+                        }
+                        _ => {}
                     });
                 }
             }
@@ -210,85 +219,106 @@ pub(crate) fn launch_terminal(terminal: crate::settings::TerminalApp) {
 }
 
 fn is_first_run() -> bool {
-    // Heuristic: settings file does not yet exist.
-    directories::ProjectDirs::from("dev", "calebterry", "ai-usage-bar")
-        .map(|d| !d.config_dir().join("settings.json").exists())
-        .unwrap_or(false)
+    // Heuristic: settings file does not yet exist. Keys off the same path
+    // `settings::load`/`save` use so the two can't drift.
+    !settings::settings_path().exists()
 }
 
 /// Background loop: poll on the configured interval and refresh the tray when
 /// the active provider's display changes.
 async fn poll_loop<R: Runtime>(app: AppHandle<R>) {
     loop {
-        let (settings, changed) = {
-            let state = app.state::<AppState>();
-            let settings = state.settings.lock().await.clone();
-            let mut agg = state.aggregator.lock().await;
-            let changed = agg.poll_enabled(&settings).await;
-            (settings, changed)
-        };
-
-        // Edge-triggered quota notifications from the freshly cached snapshots.
-        {
-            let state = app.state::<AppState>();
-            let snapshots = state.aggregator.lock().await.all_cached().clone();
-            let pending = state.notify.lock().await.evaluate(&settings, &snapshots);
-            for n in pending {
-                use tauri_plugin_notification::NotificationExt;
-                let _ = app
-                    .notification()
-                    .builder()
-                    .title(n.title)
-                    .body(n.body)
-                    .show();
-            }
-        }
-
-        // Provider service-status polling (best-effort; never blocks usage).
-        // When disabled we clear any stale incidents so the badge disappears.
-        // Track whether the incident set changed: the tray's incident header is
-        // rebuilt in `update_tray`, so a change here must force a redraw even
-        // when no provider's *usage* changed (esp. in pinned mode below).
-        let incidents_changed = {
-            let state = app.state::<AppState>();
-            let incidents = if settings.check_provider_status {
-                let http = state.http.clone();
-                status::fetch_many(&http, &settings.enabled_providers).await
-            } else {
-                Vec::new()
-            };
-            let mut guard = state.incidents.lock().await;
-            let changed = *guard != incidents;
-            *guard = incidents;
-            changed
-        };
-
-        // Redraw the tray only when a change could affect what it displays.
-        // In Auto mode any provider's change can flip the selection or update
-        // the shown figure, so any non-empty `changed` set qualifies. With an
-        // explicitly pinned provider, only that provider's own change matters.
-        // Either way, an incident-set change repaints the header.
-        let usage_redraw = match settings.active_provider {
-            crate::settings::ActiveProvider::Auto => !changed.is_empty(),
-            _ => {
-                let active = {
-                    let state = app.state::<AppState>();
-                    let agg = state.aggregator.lock().await;
-                    selector::resolve_active(&settings, agg.all_cached())
-                };
-                active.map(|a| changed.contains(&a)).unwrap_or(false)
-            }
-        };
-        let redraw = usage_redraw || incidents_changed;
-        if redraw {
-            update_tray(&app, &settings).await;
-        }
-
-        // Notify any open UI windows that data refreshed.
-        let _ = app.emit("usage-updated", ());
-
+        let settings = app.state::<AppState>().settings.lock().await.clone();
+        refresh_and_render(&app, &settings).await;
         tokio::time::sleep(settings.poll_interval()).await;
     }
+}
+
+/// The single canonical "fetch fresh data and reflect it everywhere" chain:
+/// poll enabled providers → fire edge-triggered quota notifications → refresh
+/// service-status incidents → redraw the tray if anything visible changed →
+/// emit `usage-updated` to open windows.
+///
+/// Every place that wants fresh data — the background poll loop, the tray
+/// "Refresh" item, and the `refresh_now` / `set_api_key` IPC commands — calls
+/// this so the side effects never drift (an earlier hand-rolled copy in the
+/// tray handler silently skipped notifications and incident refresh; the API-key
+/// command skipped the tray redraw and window emit entirely).
+pub(crate) async fn refresh_and_render<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
+    let changed = {
+        let state = app.state::<AppState>();
+        let mut agg = state.aggregator.lock().await;
+        agg.poll_enabled(settings).await
+    };
+
+    // Edge-triggered quota notifications from the freshly cached snapshots.
+    {
+        let state = app.state::<AppState>();
+        let snapshots = state.aggregator.lock().await.all_cached().clone();
+        let pending = state.notify.lock().await.evaluate(settings, &snapshots);
+        for n in pending {
+            use tauri_plugin_notification::NotificationExt;
+            let _ = app
+                .notification()
+                .builder()
+                .title(n.title)
+                .body(n.body)
+                .show();
+        }
+    }
+
+    // Provider service-status polling (best-effort; never blocks usage).
+    // When disabled we clear any stale incidents so the badge disappears.
+    // Track whether the incident set changed: the tray's incident header is
+    // rebuilt in `update_tray`, so a change here must force a redraw even
+    // when no provider's *usage* changed (esp. in pinned mode below).
+    let incidents_changed = {
+        let state = app.state::<AppState>();
+        let incidents = if settings.check_provider_status {
+            let http = state.http.clone();
+            status::fetch_many(&http, &settings.enabled_providers).await
+        } else {
+            Vec::new()
+        };
+        let mut guard = state.incidents.lock().await;
+        let changed = *guard != incidents;
+        *guard = incidents;
+        changed
+    };
+
+    // Resolve who's active now so we can both gate the usage redraw and detect
+    // the "nothing to show" case below.
+    let active = {
+        let state = app.state::<AppState>();
+        let agg = state.aggregator.lock().await;
+        selector::resolve_active(settings, agg.all_cached())
+    };
+
+    // Redraw the tray only when a change could affect what it displays.
+    // In Auto mode any provider's change can flip the selection or update
+    // the shown figure, so any non-empty `changed` set qualifies. With an
+    // explicitly pinned provider, only that provider's own change matters.
+    // Either way, an incident-set change repaints the header.
+    let usage_redraw = match settings.active_provider {
+        crate::settings::ActiveProvider::Auto => !changed.is_empty(),
+        _ => active.map(|a| changed.contains(&a)).unwrap_or(false),
+    };
+
+    // When no provider resolves (every provider disabled, or none cached yet),
+    // nothing lands in `changed`, so the redraw gate above stays false and the
+    // tray would keep whatever it last rendered — including the initial
+    // "Loading…" built at setup. Force one redraw in that case so `update_tray`
+    // can paint the `NO_PROVIDERS_STATUS` placeholder. `update_tray` is cheap
+    // and converges (it sets the same placeholder each time), so re-running it
+    // on subsequent empty polls is harmless.
+    let needs_empty_redraw = active.is_none();
+
+    if usage_redraw || incidents_changed || needs_empty_redraw {
+        update_tray(app, settings).await;
+    }
+
+    // Notify any open UI windows that data refreshed.
+    let _ = app.emit("usage-updated", ());
 }
 
 /// Re-render the tray icon, title, tooltip, and menu for the active provider.
@@ -300,10 +330,28 @@ async fn update_tray<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
         active.and_then(|id| agg.cached(id).cloned())
     };
 
-    let Some(snapshot) = snapshot else { return };
     let appearance = tray::theme::detect();
 
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return;
+    };
+
+    // No active snapshot resolves when every provider is disabled (or none has
+    // fetched yet). Don't bail out here — that would leave the *previous*
+    // provider's icon/title/menu frozen on screen even though the UI says no
+    // providers are enabled. Instead reset the tray to a neutral placeholder so
+    // it visibly reflects the empty state.
+    let Some(snapshot) = snapshot else {
+        let _ = tray.set_icon(app.default_window_icon().cloned());
+        #[cfg(target_os = "macos")]
+        {
+            let _ = tray.set_icon_as_template(true);
+            let _ = tray.set_title(None::<String>);
+        }
+        let _ = tray.set_tooltip(Some(NO_PROVIDERS_STATUS.to_string()));
+        if let Ok(menu) = tray::menu::build_menu(app, settings, NO_PROVIDERS_STATUS, None) {
+            let _ = tray.set_menu(Some(menu));
+        }
         return;
     };
 
@@ -344,6 +392,10 @@ async fn update_tray<R: Runtime>(app: &AppHandle<R>, settings: &Settings) {
     }
 }
 
+/// Header/tooltip shown when no provider is enabled, so the tray doesn't keep
+/// displaying a stale provider after the user disables everything.
+const NO_PROVIDERS_STATUS: &str = "No providers enabled";
+
 /// Full one-line status (provider · plan · body), used in the tooltip and menu
 /// header. The mode-specific body lives on `DisplayMode::status_summary`; this
 /// only wraps it with the provider/plan prefix and stale marker.
@@ -372,14 +424,13 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) 
                 app.exit(0);
             }
             ids::REFRESH => {
+                // Route through the canonical chain so a manual refresh fires
+                // quota notifications and refreshes incidents too — not just the
+                // tray redraw the old hand-rolled copy did. Bust the cost cache
+                // so the next cost read rescans, matching `refresh_now`.
                 let settings = app.state::<AppState>().settings.lock().await.clone();
-                {
-                    let state = app.state::<AppState>();
-                    let mut agg = state.aggregator.lock().await;
-                    agg.poll_enabled(&settings).await;
-                }
-                update_tray(&app, &settings).await;
-                let _ = app.emit("usage-updated", ());
+                crate::cost::invalidate();
+                refresh_and_render(&app, &settings).await;
             }
             ids::OPEN_TERMINAL => {
                 let terminal = app
@@ -390,12 +441,7 @@ fn on_menu_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) 
                     .default_terminal;
                 launch_terminal(terminal);
             }
-            ids::SETTINGS => {
-                if let Some(win) = app.get_webview_window("settings") {
-                    let _ = win.show();
-                    let _ = win.set_focus();
-                }
-            }
+            ids::SETTINGS => show_settings_window(&app),
             ids::PROVIDER_AUTO => set_active(&app, ActiveProvider::Auto).await,
             ids::PROVIDER_CLAUDE => set_active(&app, ActiveProvider::Claude).await,
             ids::PROVIDER_CODEX => set_active(&app, ActiveProvider::Codex).await,
@@ -466,7 +512,17 @@ pub(crate) async fn apply_settings<R: Runtime>(app: &AppHandle<R>, next: Setting
     let _ = app.emit("usage-updated", ());
 }
 
-/// Handle left-click on the tray icon (toggle the detail panel).
+/// Bring the (normally hidden) settings window to the foreground.
+fn show_settings_window<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(win) = app.get_webview_window("settings") {
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+}
+
+/// Handle left-click on the tray icon. Toggles the floating detail panel,
+/// except on Windows where `windows_float_panel == false` opens Settings
+/// instead (Windows users who prefer the classic tray-app behavior).
 fn on_tray_icon_event<R: Runtime>(tray: &tauri::tray::TrayIcon<R>, event: TrayIconEvent) {
     tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
     if let TrayIconEvent::Click {
@@ -476,6 +532,27 @@ fn on_tray_icon_event<R: Runtime>(tray: &tauri::tray::TrayIcon<R>, event: TrayIc
     } = event
     {
         let app = tray.app_handle().clone();
-        let _ = windows::float_panel::toggle(&app);
+        // The setting only exists on Windows; elsewhere left-click always
+        // toggles the panel. Spawn the settings lookup off the read so we
+        // don't block the tray callback on the settings lock.
+        #[cfg(target_os = "windows")]
+        {
+            tauri::async_runtime::spawn(async move {
+                let float_panel = {
+                    let state = app.state::<AppState>();
+                    let settings = state.settings.lock().await;
+                    settings.windows_float_panel
+                };
+                if float_panel {
+                    let _ = windows::float_panel::toggle(&app);
+                } else {
+                    show_settings_window(&app);
+                }
+            });
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = windows::float_panel::toggle(&app);
+        }
     }
 }

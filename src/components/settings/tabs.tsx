@@ -11,6 +11,7 @@ import {
   Language,
   PROVIDER_LABEL,
   ProviderId,
+  resetSettings,
   Settings as SettingsType,
   SUBSCRIPTION_PROVIDERS,
   TerminalApp,
@@ -319,23 +320,19 @@ export function DisplayTab({ t, s, update }: TabProps) {
   );
 }
 
-export function AdvancedTab({ t, s, update }: TabProps) {
+export function AdvancedTab({
+  t,
+  s,
+  update,
+  replace,
+}: TabProps & { replace: (next: SettingsType) => void }) {
   const reset = async () => {
-    // Keep the user's enabled providers; reset everything else to defaults.
-    update({
-      active_provider: "auto",
-      display_style: "numbers",
-      show_remaining: false,
-      poll_interval_secs: 180,
-      thresholds: { warn: 50, danger: 80 },
-      language: "system",
-      default_terminal: "terminal",
-      show_cost_summary: true,
-      cost_history_days: 30,
-      check_provider_status: true,
-      session_quota_notifications: true,
-      quota_warning_notifications: true,
-    });
+    // Defaults live in one place — `Settings::default()` on the backend. The
+    // `reset_settings` command keeps the user's enabled providers, persists, and
+    // returns the resulting settings, so the UI never maintains a second copy of
+    // the default values (which previously drifted from the Rust struct).
+    const next = await resetSettings();
+    replace(next);
   };
 
   return (

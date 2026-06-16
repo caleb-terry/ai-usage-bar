@@ -71,15 +71,14 @@ pub fn render_icon(
     }
 }
 
-/// Raw provider-mark PNG (white-on-transparent or color) used as the source for
-/// the template glyph. We only consume its alpha channel, so the fill color
-/// doesn't matter — the silhouette is what we tint.
-fn provider_glyph_png(provider: ProviderId) -> &'static [u8] {
+/// Raw provider-mark PNG (white-on-transparent or color) for the providers that
+/// ship one. Only the two subscription providers have a bundled brand asset; the
+/// API-key providers fall back to a rendered monogram (see `render_provider_glyph`).
+fn provider_glyph_png(provider: ProviderId) -> Option<&'static [u8]> {
     match provider {
-        ProviderId::Claude => include_bytes!("../../icons/providers/claude-color.png"),
-        // API-key providers have no bundled brand mark yet; reuse the neutral
-        // Codex silhouette so the tray still renders a glyph.
-        _ => include_bytes!("../../icons/providers/codex-white.png"),
+        ProviderId::Claude => Some(include_bytes!("../../icons/providers/claude-color.png")),
+        ProviderId::Codex => Some(include_bytes!("../../icons/providers/codex-white.png")),
+        _ => None,
     }
 }
 
@@ -92,7 +91,14 @@ pub fn render_provider_glyph(provider: ProviderId, appearance: Appearance) -> Re
     let fg = appearance.foreground();
     let mut out = RgbaImage::new(GLYPH_SIZE, GLYPH_SIZE);
 
-    if let Ok(src) = image::load_from_memory(provider_glyph_png(provider)) {
+    // API-key providers have no bundled brand PNG — draw a neutral monogram (the
+    // provider's first initial) so the tray still distinguishes them rather than
+    // showing a competitor's silhouette for all twelve.
+    let Some(png) = provider_glyph_png(provider) else {
+        return render_monogram_glyph(provider, fg);
+    };
+
+    if let Ok(src) = image::load_from_memory(png) {
         // Fit the mark inside a small inset so it reads cleanly at menu-bar size.
         let inset = 3u32;
         let target = GLYPH_SIZE - inset * 2;
@@ -130,6 +136,33 @@ pub fn render_provider_glyph(provider: ProviderId, appearance: Appearance) -> Re
         width: GLYPH_SIZE,
         height: GLYPH_SIZE,
         // Template on macOS so the system handles light/dark inversion.
+        is_template: cfg!(target_os = "macos"),
+    }
+}
+
+/// Draw a provider's first initial centered in a circle, for API-key providers
+/// that ship no brand PNG. Painted in the foreground color and flagged as a
+/// template on macOS, matching `render_provider_glyph`.
+fn render_monogram_glyph(provider: ProviderId, fg: [u8; 4]) -> RenderedIcon {
+    let mut out = RgbaImage::new(GLYPH_SIZE, GLYPH_SIZE);
+    let color = Rgba(fg);
+    let font = FontRef::try_from_slice(FONT_BYTES).expect("embedded font");
+
+    let initial = provider
+        .meta()
+        .label
+        .chars()
+        .next()
+        .unwrap_or('?')
+        .to_ascii_uppercase()
+        .to_string();
+    // Roughly center a ~22px cap-height glyph in the 36px box.
+    draw_text_centered(&mut out, &font, &initial, 24.0, 5.0, color);
+
+    RenderedIcon {
+        rgba: out.into_raw(),
+        width: GLYPH_SIZE,
+        height: GLYPH_SIZE,
         is_template: cfg!(target_os = "macos"),
     }
 }
@@ -241,7 +274,6 @@ fn fill_rect(img: &mut RgbaImage, x: u32, y: u32, w: u32, h: u32, color: Rgba<u8
     }
 }
 
-#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn draw_text_centered(
     img: &mut RgbaImage,
     font: &FontRef,
@@ -283,7 +315,6 @@ fn draw_text_centered(
     }
 }
 
-#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn blend_pixel(img: &mut RgbaImage, x: u32, y: u32, color: Rgba<u8>, coverage: f32) {
     let a = coverage.clamp(0.0, 1.0);
     let existing = img.get_pixel(x, y).0;
@@ -296,7 +327,6 @@ fn blend_pixel(img: &mut RgbaImage, x: u32, y: u32, color: Rgba<u8>, coverage: f
     img.put_pixel(x, y, Rgba(out));
 }
 
-#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn blend(bg: u8, fg: u8, a: f32) -> u8 {
     ((bg as f32) * (1.0 - a) + (fg as f32) * a).round() as u8
 }

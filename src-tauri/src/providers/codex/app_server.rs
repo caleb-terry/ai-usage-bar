@@ -63,6 +63,12 @@ async fn run_rpc() -> ProviderResult<RawUsage> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
+        // `fetch_via_app_server` wraps this whole future in a timeout. If the
+        // timeout fires while we're awaiting stdout below, the future (and this
+        // `child`) is dropped before the explicit `child.kill()` on the normal
+        // path runs — without this, the spawned `codex` process would be
+        // orphaned. `kill_on_drop` makes Tokio reap it on drop too.
+        .kill_on_drop(true)
         .spawn()
         .map_err(|e| ProviderError::Other(format!("spawn codex: {e}")))?;
 
@@ -112,4 +118,50 @@ async fn run_rpc() -> ProviderResult<RawUsage> {
         }),
         ..Default::default()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_rate_limits_envelope() {
+        // A well-formed JSON-RPC reply maps both windows through to RateWindow.
+        let line = r#"{"jsonrpc":"2.0","id":1,"result":{"primary":{"used_percent":42.5,"resets_at":1893456000},"secondary":{"used_percent":12.0,"resets_at":1893460000}}}"#;
+        let env: RpcEnvelope = serde_json::from_str(line).unwrap();
+        assert_eq!(env.id, Some(1));
+        let result = env.result.expect("result present");
+        let primary: RateWindow = result.primary.unwrap().into();
+        assert_eq!(primary.used_percent, 42.5);
+        assert_eq!(primary.reset_at, Some(1893456000));
+        assert!(primary.limit_window_seconds.is_none());
+        let secondary: RateWindow = result.secondary.unwrap().into();
+        assert_eq!(secondary.used_percent, 12.0);
+    }
+
+    #[test]
+    fn missing_fields_default_rather_than_fail() {
+        // The bespoke `#[serde(default)]` structs must tolerate a sparse reply:
+        // absent windows/fields deserialize to None/0, never an error. This is
+        // the silent-zeros risk the audit flagged — pin it so a wire change that
+        // *renames* a field is caught here (deserializes to zeros) rather than in
+        // production.
+        let line = r#"{"jsonrpc":"2.0","id":1,"result":{"primary":{}}}"#;
+        let env: RpcEnvelope = serde_json::from_str(line).unwrap();
+        let result = env.result.unwrap();
+        let primary: RateWindow = result.primary.unwrap().into();
+        assert_eq!(primary.used_percent, 0.0);
+        assert_eq!(primary.reset_at, None);
+        assert!(result.secondary.is_none());
+    }
+
+    #[test]
+    fn non_matching_id_has_no_result() {
+        // A reply for a different request id is ignored by the reader loop; here
+        // we just confirm an unrelated notification has no result to latch onto.
+        let line = r#"{"jsonrpc":"2.0","method":"someNotification","params":{}}"#;
+        let env: RpcEnvelope = serde_json::from_str(line).unwrap();
+        assert_eq!(env.id, None);
+        assert!(env.result.is_none());
+    }
 }

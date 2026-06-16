@@ -146,6 +146,9 @@ export interface CostSummary {
 export const getSettings = () => invoke<Settings>("get_settings");
 export const setSettings = (settings: Settings) =>
   invoke<void>("set_settings", { settings });
+/// Reset every setting to its backend default, keeping the enabled provider set.
+/// Returns the resulting settings so the UI doesn't duplicate the defaults.
+export const resetSettings = () => invoke<Settings>("reset_settings");
 export const getUsage = () => invoke<UsageReport>("get_usage");
 export const refreshNow = () => invoke<UsageReport>("refresh_now");
 export const openTerminal = () => invoke<void>("open_terminal");

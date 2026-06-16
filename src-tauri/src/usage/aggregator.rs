@@ -225,7 +225,8 @@ mod tests {
         assert_eq!(agg.all_cached().len(), 2);
 
         // Disabling Codex evicts it from the cache.
-        agg.poll_enabled(&settings_with(&[ProviderId::Claude])).await;
+        agg.poll_enabled(&settings_with(&[ProviderId::Claude]))
+            .await;
         assert!(agg.cached(ProviderId::Claude).is_some());
         assert!(agg.cached(ProviderId::Codex).is_none());
     }

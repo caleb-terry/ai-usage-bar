@@ -83,7 +83,7 @@ it works across:
 
 Download the latest build from the [Releases](../../releases) page:
 
-- **macOS**: `.dmg` (universal — Apple Silicon + Intel)
+- **macOS**: `.dmg` (Apple Silicon only — built natively for `aarch64`)
 - **Windows**: `.msi` / `.exe`
 
 ### Unsigned builds
